@@ -302,17 +302,51 @@ docker login nvcr.io
 ```
 
 ### B2-alt. Skopeo fallback — proven path when docker daemon can't pull
+Skopeo uses libcurl semantics, which most corp proxies accept where docker
+daemon doesn't. `make pull-stack` auto-extracts the image list from the compose
+files; idempotent (skips already-loaded); retries 3× per image.
+
+#### Install + smoke test (1 small image first)
 ```bash
 sudo apt install -y skopeo
-export NGC_API_KEY=<your-ngc-key>          # for nvcr.io images
 cd /data/srv
-make pull-stack                            # pulls all 13 stack images
-# or just specific images:
-# make pull-stack images='nvcr.io/nvidia/vllm:25.11-py3 redis:7'
+make pull-stack images='caddy:2'           # ~50 MB; proves the pipeline works
+docker images | grep caddy                 # should show: caddy 2 <id> ...
 ```
-Skopeo uses libcurl semantics, which most corp proxies accept where docker
-daemon doesn't. Auto-extracts the image list from the compose files;
-idempotent (skips already-loaded); retries 3× per image.
+
+#### Then pull in two batches — public registries first, NGC second
+
+**Public-registry images (no auth — 10 of 13):**
+```bash
+make pull-stack images='postgres:16 redis:7 qdrant/qdrant:latest \
+  minio/minio:latest ollama/ollama:latest grafana/grafana:latest \
+  prom/prometheus:latest prom/node-exporter:latest \
+  ghcr.io/huggingface/text-embeddings-inference:latest \
+  gcr.io/cadvisor/cadvisor:v0.49.1'
+```
+
+**NGC images (need API key from A1.3):**
+```bash
+export NGC_API_KEY=<your-ngc-api-key>
+make pull-stack images='nvcr.io/nvidia/vllm:25.11-py3 \
+  nvcr.io/nvidia/k8s/dcgm-exporter:3.3.9-3.6.1-ubuntu22.04'
+```
+
+> **vLLM image is ~20 GB** at your proxy throughput it may take **hours**.
+> Run it under `tmux` or `nohup` so a dropped SSH doesn't kill it:
+> ```
+> nohup make pull-stack images='nvcr.io/nvidia/vllm:25.11-py3' &> ~/vllm-pull.log &
+> disown
+> tail -f ~/vllm-pull.log
+> ```
+
+#### Verify all images landed
+```bash
+docker images | sort
+# expect 13 entries, each with proper REPOSITORY:TAG (not <none>)
+```
+
+After this, `make up` skips the pull step entirely — all images are local.
 
 ### B3. Bring up the stack
 ```bash
