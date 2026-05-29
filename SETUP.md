@@ -113,20 +113,23 @@ sudo systemctl daemon-reload
 sudo systemctl restart docker
 ```
 
-#### A4.6 Verify (smoke tests — defer image pulls until IT clears NGC)
+#### A4.6 Add yourself to the `docker` group
+Do this BEFORE the verify step — `docker info` needs socket access, which is
+group-gated. Without `docker` group membership you'll get
+*"permission denied while trying to connect to the Docker daemon socket"*.
+```bash
+sudo usermod -aG docker $USER
+newgrp docker           # apply to current shell without logout
+docker ps               # smoke: should work without sudo (empty list is fine)
+```
+
+#### A4.7 Verify (smoke tests — defer image pulls until IT clears NGC)
 ```bash
 docker info | grep -iE 'server version|runtimes'        # expect nvidia runtime listed
 systemctl show docker --property=Environment | head     # proxy vars populated
 docker run --rm hello-world                              # if proxy/NGC cleared
 # only if NGC is reachable:
 # docker run --rm --gpus all nvcr.io/nvidia/cuda:12.6.0-base-ubuntu22.04 nvidia-smi
-```
-
-#### A4.7 Add yourself to the `docker` group
-```bash
-sudo usermod -aG docker $USER
-newgrp docker           # apply without logout
-docker ps               # should work without sudo
 ```
 
 > **Important — order with A5:** `make install-system` (next step) merges log
