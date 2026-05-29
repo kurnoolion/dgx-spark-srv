@@ -127,5 +127,7 @@ symptom→fix troubleshooting table.
 - `health.sh` (`make health`) — daily health checks / cron probe
 - `backup.sh` (`make backup`) — backups (see RUNBOOK.md)
 - `download-models.sh` (`make download-models`) — bulk HF model pre-download
+- `skopeo-pull-stack.sh` (`make pull-stack`) — pull all stack images via skopeo (proxy fallback when `docker pull` fails)
+- `diagnose-hf.sh` — HF download stall diagnostics
 - `SETUP.md` — first-time deployment procedure
 - `STORAGE.md` / `RUNBOOK.md` — disk layout / operations

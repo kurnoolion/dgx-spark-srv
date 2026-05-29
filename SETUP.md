@@ -291,17 +291,37 @@ sudo update-ca-certificates
 sudo systemctl restart docker
 ```
 
-### B2. Log in to NGC (using the key from A1.3)
+> **If `docker pull` fails with `EOF` or hangs even after IT exception**
+> (proxy doesn't get along with docker daemon's HTTP/2 / Go client pattern),
+> use **skopeo** as the proxy-friendly fallback — skip B2 (skopeo handles
+> NGC auth via `NGC_API_KEY` env var) and jump to B2-alt below.
+
+### B2. Log in to NGC (using the key from A1.3) — only needed if `docker pull` works
 ```bash
 docker login nvcr.io
 ```
+
+### B2-alt. Skopeo fallback — proven path when docker daemon can't pull
+```bash
+sudo apt install -y skopeo
+export NGC_API_KEY=<your-ngc-key>          # for nvcr.io images
+cd /data/srv
+make pull-stack                            # pulls all 13 stack images
+# or just specific images:
+# make pull-stack images='nvcr.io/nvidia/vllm:25.11-py3 redis:7'
+```
+Skopeo uses libcurl semantics, which most corp proxies accept where docker
+daemon doesn't. Auto-extracts the image list from the compose files;
+idempotent (skips already-loaded); retries 3× per image.
 
 ### B3. Bring up the stack
 ```bash
 cd /data/srv
 make up                              # ordered: core → vLLM (waits) → ollama/tei → gateway/apps/observability
 ```
-vLLM is the long pull (~15–25 GB) plus its model load. First `make up` can take 10–20 minutes.
+`make up` will try to pull any missing images, but if you ran B2-alt above
+all images are local and it just runs them. First `make up` takes a few
+minutes for vLLM model load even with images cached.
 
 ### B4. Pull Ollama models
 ```bash

@@ -18,7 +18,7 @@ APPS      := -f compose.apps.yml
 OBS       := -f compose.observability.yml
 COMPOSE   := docker compose $(CORE) $(INFER) $(GATEWAY) $(APPS) $(OBS)
 
-.PHONY: init up down restart logs ps pull deploy models gpu health rebalance vllm-stop vllm-start backup prune prune-status install-system download-models
+.PHONY: init up down restart logs ps pull deploy models gpu health rebalance vllm-stop vllm-start backup prune prune-status install-system download-models pull-stack
 
 # Create the bind-mount directories before first `up`. Run once.
 # Postgres/MinIO run as root then drop privileges, so root-owned dirs are fine;
@@ -70,6 +70,11 @@ deploy: pull
 # Retries + logs to ~/hf-download.log. Safe to run any time, idempotent.
 download-models:
 	./download-models.sh $(models)
+
+# Pull every stack image via skopeo (works through corp proxies where
+# `docker pull` fails). Idempotent; needs NGC_API_KEY for nvcr.io images.
+pull-stack:
+	./skopeo-pull-stack.sh $(images)
 
 # Default Ollama models — sized to stay in the 25% (~28GB) slice (1 loaded at a time).
 models:
