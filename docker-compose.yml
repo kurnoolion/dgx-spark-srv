@@ -1,0 +1,53 @@
+# Core backend data services. All images below are multi-arch (run native on aarch64).
+# Verify any new image with: docker manifest inspect <image> | grep arm64
+networks:
+  apex:
+    name: apex
+
+# Durable service data is BIND-MOUNTED onto the /data/srv LV (700GB, backed up),
+# not stored in Docker named volumes (which would land on /var/lib/docker).
+# Run `make init` once to create these dirs. See STORAGE.md.
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${PG_USER}
+      POSTGRES_PASSWORD: ${PG_PW}
+      POSTGRES_DB: ${PG_DB}
+    volumes:
+      - /data/srv/data/postgres:/var/lib/postgresql/data
+    networks: [apex]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
+    volumes:
+      - /data/srv/data/redis:/data
+    networks: [apex]
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:latest        # vector DB for the APEX KG+RAG
+    volumes:
+      - /data/srv/data/qdrant:/qdrant/storage
+      - /data/srv/data/qdrant-snapshots:/qdrant/snapshots   # `make backup` target
+    networks: [apex]
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - /data/srv/data/minio:/data
+    networks: [apex]
+    restart: unless-stopped

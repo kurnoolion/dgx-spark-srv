@@ -1,0 +1,83 @@
+# GPU inference services. Memory split: vLLM 75% / Ollama 25% of the inference pool.
+# IMPORTANT bring-up order: vLLM first (it pre-allocates its slice), then Ollama.
+networks:
+  apex:
+    name: apex
+
+# Model data (re-downloadable) lives on the /data/models LV (1.8TB, XFS, not
+# backed up) — bind-mounted, not in Docker named volumes. See STORAGE.md.
+
+services:
+  # ── vLLM — 75% of inference pool (~84GB via gpu-memory-utilization 0.65) ──
+  vllm:
+    image: nvcr.io/nvidia/vllm:25.11-py3      # NGC Spark-tuned, GB10/sm_121 ready
+    command:
+      - vllm
+      - serve
+      - ${VLLM_MODEL}
+      - --gpu-memory-utilization
+      - "${VLLM_GPU_UTIL}"
+      - --max-model-len
+      - "${VLLM_MAX_LEN}"
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8000"
+    environment:
+      HF_TOKEN: ${HF_TOKEN}
+      HF_HUB_ENABLE_HF_TRANSFER: "1"
+    volumes:
+      - /data/hf-cache:/root/.cache/huggingface
+    networks: [apex]
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 300s          # large models take minutes to load
+
+  # ── Ollama — 25% of inference pool (~28GB; enforced by 1-model-at-a-time) ──
+  ollama:
+    image: ollama/ollama:latest
+    environment:
+      OLLAMA_HOST: "0.0.0.0"
+      OLLAMA_MAX_LOADED_MODELS: "1"   # hard discipline so Ollama stays in its 28GB
+      OLLAMA_NUM_PARALLEL: "2"
+      OLLAMA_KEEP_ALIVE: "30m"
+    volumes:
+      - /data/models/ollama:/root/.ollama
+    networks: [apex]
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # ── TEI — production embeddings for the RAG pipeline ──
+  tei:
+    image: ghcr.io/huggingface/text-embeddings-inference:latest
+    command: ["--model-id", "${TEI_MODEL}"]
+    environment:
+      HF_TOKEN: ${HF_TOKEN}
+    volumes:
+      - /data/hf-cache:/data
+    networks: [apex]
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

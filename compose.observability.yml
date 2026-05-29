@@ -1,0 +1,75 @@
+# Observability: Prometheus + Grafana + exporters. Focused on memory (per
+# container, host, and GPU — all share the 128GB unified pool). Own footprint
+# ~1.5GB; TSDB capped at 15d retention. Grafana behind the gateway at /grafana.
+networks:
+  apex:
+    name: apex
+
+services:
+  prometheus:
+    image: prom/prometheus:latest          # multi-arch (arm64 ok)
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - /data/srv/data/prometheus:/prometheus
+    networks: [apex]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest           # multi-arch (arm64 ok)
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+      GF_SERVER_ROOT_URL: "https://${SITE_HOST}/grafana/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - /data/srv/data/grafana:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks: [apex]
+    restart: unless-stopped
+
+  # Per-container CPU/memory/net/disk — the source of per-service memory metrics.
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1   # verify arm64 tag exists for your pull
+    command: ["-housekeeping_interval=15s", "-docker_only=true"]
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    devices: ["/dev/kmsg"]
+    privileged: true
+    networks: [apex]
+    restart: unless-stopped
+
+  # Host-level memory/cpu/disk (total RAM, MemAvailable, etc.)
+  node-exporter:
+    image: prom/node-exporter:latest          # multi-arch (arm64 ok)
+    command: ["--path.rootfs=/host"]
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+    networks: [apex]
+    restart: unless-stopped
+
+  # GPU memory/util/temp via NVIDIA DCGM. TAG IS VERSION/ARCH SENSITIVE on GB10 —
+  # verify an aarch64 tag on NGC; if it won't start, GPU mem is still visible via
+  # `nvidia-smi` / `make health` and the rest of the stack works without it.
+  dcgm-exporter:
+    image: nvcr.io/nvidia/k8s/dcgm-exporter:3.3.9-3.6.1-ubuntu22.04
+    cap_add: [SYS_ADMIN]
+    networks: [apex]
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, utility]

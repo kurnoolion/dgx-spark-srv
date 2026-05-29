@@ -1,0 +1,20 @@
+# Caddy reverse proxy — single TLS entrypoint. NO auth (relies on VPN/network).
+# See git history for the prior oauth2-proxy + forward_auth version if needed.
+networks:
+  apex:
+    name: apex
+
+services:
+  caddy:
+    image: caddy:2
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - /data/srv/data/caddy:/data          # TLS certs + internal-CA state
+      - /data/srv/data/caddy-config:/config
+    environment:
+      SITE_HOST: ${SITE_HOST}
+    networks: [apex]
+    restart: unless-stopped

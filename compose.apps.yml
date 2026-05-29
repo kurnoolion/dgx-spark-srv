@@ -1,0 +1,20 @@
+# Your web / backend apps. Each must be arm64 / multi-arch.
+# Example shows the pattern: build from an arm64 base, join the apex network,
+# let Caddy route to it. Replace with real APEX services (DeliverableHub, req-agent, ...).
+networks:
+  apex:
+    name: apex
+
+services:
+  example-app:
+    build:
+      context: ./apps/example-app    # contains a Dockerfile FROM python:3.12-slim
+    environment:
+      DATABASE_URL: postgresql://${PG_USER}:${PG_PW}@postgres:5432/${PG_DB}
+      REDIS_URL: redis://redis:6379/0
+      QDRANT_URL: http://qdrant:6333
+      VLLM_BASE_URL: http://vllm:8000/v1
+      TEI_URL: http://tei:80
+    networks: [apex]
+    restart: unless-stopped
+    # no ports: — only Caddy is exposed; reached internally at http://example-app:8080

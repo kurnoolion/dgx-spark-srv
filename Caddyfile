@@ -1,0 +1,39 @@
+# Single TLS entrypoint — NO gateway auth (relies on VPN/network restrictions).
+# `tls internal` issues a self-signed cert from Caddy's internal CA — fine for a
+# VPN-only box. For corp PKI, replace with:
+#   tls /etc/caddy/cert.pem /etc/caddy/key.pem
+#
+# If you ever need auth back, see git history for the oauth2-proxy version, or
+# add `basicauth` blocks per route, or restore forward_auth to an auth proxy.
+
+{$SITE_HOST} {
+	tls internal
+
+	# OpenAI-compatible LLM API (vLLM) — /v1 path preserved.
+	handle /v1/* {
+		reverse_proxy vllm:8000
+	}
+
+	# Embeddings (TEI) — prefix stripped.
+	handle_path /embed/* {
+		reverse_proxy tei:80
+	}
+
+	# Ollama API — prefix stripped.
+	handle_path /ollama/* {
+		reverse_proxy ollama:11434
+	}
+
+	# APEX application(s).
+	handle_path /apex/* {
+		reverse_proxy example-app:8080
+	}
+
+	# Grafana — prefix preserved (Grafana serves from /grafana sub-path).
+	handle /grafana/* {
+		reverse_proxy grafana:3000
+	}
+
+	# default
+	respond "apex-spark-01 gateway" 200
+}

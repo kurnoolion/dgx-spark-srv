@@ -1,0 +1,28 @@
+# Secrets — NEVER commit
+.env
+.env.local
+.env.production
+.env.sops
+.env.enc
+*.key
+*.pem
+~/.age-key.txt
+
+# fstab + daemon.json backups (script-generated, may contain machine-specific paths)
+*.bak
+*.bak.*
+
+# Editor / OS
+*.swp
+*.swo
+*~
+.DS_Store
+.vscode/
+.idea/
+
+# Runtime / generated (in case anyone ever runs make init inside the source dir)
+data/
+backups/
+
+# Logs
+*.log
