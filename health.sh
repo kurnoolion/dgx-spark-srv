@@ -13,7 +13,8 @@ cd "$(dirname "$0")"
 DISK_WARN="${DISK_WARN:-85}"
 GPU_TEMP_WARN="${GPU_TEMP_WARN:-80}"
 COMPOSE="docker compose -f docker-compose.yml -f compose.inference.yml -f compose.gateway.yml -f compose.apps.yml -f compose.observability.yml"
-SERVICES="postgres redis qdrant minio vllm ollama tei caddy example-app prometheus grafana cadvisor node-exporter dcgm-exporter"
+SERVICES="postgres redis qdrant minio vllm ollama caddy example-app prometheus grafana cadvisor node-exporter dcgm-exporter"
+# NOTE: tei excluded — needs source build for arm64. See compose.inference.yml.
 
 fails=0; warns=0
 ok()   { printf '  \e[32mPASS\e[0m %s\n' "$*"; }

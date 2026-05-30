@@ -316,14 +316,22 @@ docker images | grep caddy                 # should show: caddy 2 <id> ...
 
 #### Then pull in two batches — public registries first, NGC second
 
-**Public-registry images (no auth — 10 of 13):**
+**Public-registry images (no auth — 10 of 12 — TEI is disabled, see note below):**
 ```bash
 make pull-stack images='postgres:16 redis:7 qdrant/qdrant:latest \
   minio/minio:latest ollama/ollama:latest grafana/grafana:latest \
   prom/prometheus:latest prom/node-exporter:latest \
-  ghcr.io/huggingface/text-embeddings-inference:latest \
+  caddy:2 \
   gcr.io/cadvisor/cadvisor:v0.49.1'
 ```
+
+> **TEI (Text Embeddings Inference) is currently commented out** in
+> `compose.inference.yml`. HuggingFace doesn't publish an arm64 prebuilt — every
+> tag is `linux/amd64` only on aarch64 inspection. To enable, **build from
+> source on the spark** (see the commented block at the bottom of
+> `compose.inference.yml` for the exact `docker build` commands). Two variants:
+> CPU-only arm64 (~15 min, 50-150ms/embedding) or full GB10/sm_121 GPU (~30-60 min,
+> 5-15ms/embedding). The other 12 services don't depend on TEI being present.
 
 **NGC images (need API key from A1.3):**
 ```bash
@@ -343,7 +351,8 @@ make pull-stack images='nvcr.io/nvidia/vllm:25.11-py3 \
 #### Verify all images landed
 ```bash
 docker images | sort
-# expect 13 entries, each with proper REPOSITORY:TAG (not <none>)
+# expect 12 entries, each with proper REPOSITORY:TAG (not <none>)
+# (TEI is disabled pending source build; see compose.inference.yml)
 ```
 
 After this, `make up` skips the pull step entirely — all images are local.

@@ -65,19 +65,39 @@ services:
               capabilities: [gpu]
 
   # ── TEI — production embeddings for the RAG pipeline ──
-  tei:
-    image: ghcr.io/huggingface/text-embeddings-inference:latest
-    command: ["--model-id", "${TEI_MODEL}"]
-    environment:
-      HF_TOKEN: ${HF_TOKEN}
-    volumes:
-      - /data/hf-cache:/data
-    networks: [apex]
-    restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+  # DISABLED (2026-05-29): HuggingFace doesn't publish arm64 prebuilt images
+  # for any TEI tag (verified :latest and :cpu-latest = linux/amd64 only).
+  # To enable, BUILD FROM SOURCE on the spark:
+  #
+  #   cd ~ && git clone https://github.com/huggingface/text-embeddings-inference
+  #   cd text-embeddings-inference
+  #   # CPU build (fast, ~50-150ms/embedding for bge-m3, no GPU mem used):
+  #   docker build -f Dockerfile-arm64 --platform=linux/arm64 \
+  #     --build-arg HTTP_PROXY=$HTTP_PROXY --build-arg HTTPS_PROXY=$HTTPS_PROXY \
+  #     -t local/tei:cpu-arm64 .
+  #   # OR full GB10 GPU build (~5-15ms/embedding, sm_121):
+  #   docker build -f Dockerfile-cuda --platform=linux/arm64 \
+  #     --build-arg CUDA_COMPUTE_CAP=121 \
+  #     --build-arg HTTP_PROXY=$HTTP_PROXY --build-arg HTTPS_PROXY=$HTTPS_PROXY \
+  #     -t local/tei:gb10 .
+  #
+  # Then uncomment the block below, set `image:` to `local/tei:cpu-arm64` or
+  # `local/tei:gb10`, and `make restart svc=tei` (or `make up`). For CPU build,
+  # also remove the `deploy.resources.reservations.devices` block — no GPU.
+  #
+  # tei:
+  #   image: local/tei:gb10                      # set to whatever you built
+  #   command: ["--model-id", "${TEI_MODEL}"]
+  #   environment:
+  #     HF_TOKEN: ${HF_TOKEN}
+  #   volumes:
+  #     - /data/models/hf-cache:/data            # bind-mount the shared HF cache
+  #   networks: [apex]
+  #   restart: unless-stopped
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: all
+  #             capabilities: [gpu]
