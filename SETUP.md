@@ -325,13 +325,11 @@ make pull-stack images='postgres:16 redis:7 qdrant/qdrant:latest \
   gcr.io/cadvisor/cadvisor:v0.49.1'
 ```
 
-> **TEI (Text Embeddings Inference) is currently commented out** in
-> `compose.inference.yml`. HuggingFace doesn't publish an arm64 prebuilt — every
-> tag is `linux/amd64` only on aarch64 inspection. To enable, **build from
-> source on the spark** (see the commented block at the bottom of
-> `compose.inference.yml` for the exact `docker build` commands). Two variants:
-> CPU-only arm64 (~15 min, 50-150ms/embedding) or full GB10/sm_121 GPU (~30-60 min,
-> 5-15ms/embedding). The other 12 services don't depend on TEI being present.
+> **TEI** is included in the stack but **must be built from source** —
+> HuggingFace doesn't publish an arm64 prebuilt (verified `:latest` and
+> `:cpu-latest` are both `linux/amd64` only on aarch64 inspection). Build
+> instructions in **B2-build** below. The other 11 images you pull here;
+> TEI image gets built locally.
 
 **NGC images (need API key from A1.3):**
 ```bash
@@ -348,14 +346,76 @@ make pull-stack images='nvcr.io/nvidia/vllm:25.11-py3 \
 > tail -f ~/vllm-pull.log
 > ```
 
-#### Verify all images landed
+#### Verify the 12 pulled images landed
 ```bash
 docker images | sort
-# expect 12 entries, each with proper REPOSITORY:TAG (not <none>)
-# (TEI is disabled pending source build; see compose.inference.yml)
+# expect 12 entries (the stack minus TEI), each with proper REPOSITORY:TAG
+# (TEI will be built locally in B2-build below → 13 total after that)
 ```
 
-After this, `make up` skips the pull step entirely — all images are local.
+### B2-build. Build TEI from source (no arm64 prebuilt exists)
+
+TEI is in `compose.inference.yml` but its image is `local/tei:cpu-arm64` — you
+build it on the spark. Default below is the **CPU/arm64 build** for v1
+(~15 min, ~50-150ms/embedding, no GPU mem cost). GPU build is an upgrade path.
+
+#### Pre-pull the build base image (docker build can't `docker pull` either)
+Inspect the FROM line so you know which base to pre-pull via skopeo:
+```bash
+cd ~ && git clone https://github.com/huggingface/text-embeddings-inference
+cd text-embeddings-inference
+grep -m1 ^FROM Dockerfile-arm64
+# typical: FROM ubuntu:22.04 AS base   (or similar)
+```
+Pre-pull whatever it says (substitute below if different):
+```bash
+cd /data/srv
+make pull-stack images='ubuntu:22.04'    # the FROM base for Dockerfile-arm64
+```
+
+#### Build the CPU/arm64 image (v1 default)
+```bash
+cd ~/text-embeddings-inference
+docker build -f Dockerfile-arm64 --platform=linux/arm64 \
+  --build-arg HTTP_PROXY=$HTTP_PROXY \
+  --build-arg HTTPS_PROXY=$HTTPS_PROXY \
+  --build-arg NO_PROXY=localhost,127.0.0.1,::1 \
+  -t local/tei:cpu-arm64 .
+docker images | grep tei                  # expect: local/tei  cpu-arm64  ...
+```
+Build is mostly Rust compilation (~15-20 min on the spark). Watch out for
+`apt-get` or `cargo` failing on TLS errors — if so, the Dockerfile may need
+the proxy ARG declared explicitly. Easiest patch:
+```bash
+# add at the top of Dockerfile-arm64 (just under FROM):
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ENV HTTP_PROXY=$HTTP_PROXY HTTPS_PROXY=$HTTPS_PROXY NO_PROXY=$NO_PROXY
+```
+…then re-run the docker build.
+
+#### (Optional, upgrade path) GPU build for sm_121
+Build is longer (~30-60 min), needs the CUDA base from NGC:
+```bash
+make pull-stack images='nvcr.io/nvidia/cuda:12.6.0-devel-ubuntu22.04'  # adjust per Dockerfile-cuda's FROM
+docker build -f Dockerfile-cuda --platform=linux/arm64 \
+  --build-arg CUDA_COMPUTE_CAP=121 \
+  --build-arg HTTP_PROXY=$HTTP_PROXY \
+  --build-arg HTTPS_PROXY=$HTTPS_PROXY \
+  -t local/tei:gb10 .
+```
+Then in `.env`:
+```
+TEI_IMAGE=local/tei:gb10
+```
+And re-add the GPU reservation block to `tei:` in `compose.inference.yml`
+(copy the structure from the `vllm:` service). Drop `VLLM_GPU_UTIL` ~0.03 to
+make ~4 GB headroom for TEI's GPU footprint, or you'll OOM.
+
+After either build, `tei` is ready to start when `make up` runs.
+
+After all of B2-alt + B2-build, `make up` skips pulls entirely — every image is local.
 
 ### B3. Bring up the stack
 ```bash
