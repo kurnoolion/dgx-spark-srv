@@ -128,6 +128,7 @@ symptom→fix troubleshooting table.
 - `backup.sh` (`make backup`) — backups (see RUNBOOK.md)
 - `download-models.sh` (`make download-models`) — bulk HF model pre-download
 - `skopeo-pull-stack.sh` (`make pull-stack`) — pull all stack images via skopeo (proxy fallback when `docker pull` fails)
+- `load-tei-on-spark.sh` — load the TEI image tarball built off-box (see SETUP.md B2-build)
 - `diagnose-hf.sh` — HF download stall diagnostics
 - `SETUP.md` — first-time deployment procedure
 - `STORAGE.md` / `RUNBOOK.md` — disk layout / operations

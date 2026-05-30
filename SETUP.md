@@ -415,6 +415,48 @@ make ~4 GB headroom for TEI's GPU footprint, or you'll OOM.
 
 After either build, `tei` is ready to start when `make up` runs.
 
+#### Fallback: build off-box, sneakernet the tarball
+
+If `docker build` on the spark keeps fighting your corp proxy (BuildKit
+manifest resolution, cargo fetch, apt-get TLS — every layer has its own opinion),
+build on another machine with internet (your WSL is fine — use QEMU emulation).
+
+**On WSL:** use `~/work/build-tei-arm64.sh` (a separate script outside this
+bundle — does emulation setup + buildx + clone + build + `docker save`):
+```bash
+sudo ~/work/build-tei-arm64.sh                    # ~30-60 min, unattended
+# output: ~/work/tei-cpu-arm64.tar (~1-2 GB)
+```
+
+**Transfer + load on spark:**
+```bash
+# from WSL:
+rsync -av ~/work/tei-cpu-arm64.tar <user>@spark-1d46:/tmp/
+
+# on spark:
+cd /data/srv
+./load-tei-on-spark.sh                            # default: /tmp/tei-cpu-arm64.tar
+# or restart tei service immediately:
+./load-tei-on-spark.sh --restart --cleanup        # also delete tar after
+```
+
+The load script verifies the image name matches what compose expects
+(`local/tei:cpu-arm64`), auto-tags if it doesn't, and optionally restarts
+the tei container.
+
+**Or via GitHub release** (if direct network to spark isn't an option — release
+assets hold up to 2 GB):
+```bash
+# from WSL:
+gh release create tei-cpu-arm64-$(date +%Y%m%d) ~/work/tei-cpu-arm64.tar \
+  --repo kurnoolion/dgx-spark-srv --title 'TEI CPU arm64 build'
+
+# on spark:
+gh release download tei-cpu-arm64-<date> --repo kurnoolion/dgx-spark-srv \
+  --pattern tei-cpu-arm64.tar --dir /tmp/
+./load-tei-on-spark.sh --restart --cleanup
+```
+
 After all of B2-alt + B2-build, `make up` skips pulls entirely — every image is local.
 
 ### B3. Bring up the stack
