@@ -32,6 +32,13 @@ services:
       #   /data/hf-cache    (HF cache layout — for VLLM_MODEL=Qwen/Qwen3-32B-AWQ style)
       #   /data/local       (flat dirs from hf-curl-download.sh — for VLLM_MODEL=/data/local/<repo>)
       - /data/models:/data
+    # NVIDIA NGC vLLM image REQUIRES these — default Docker SHM is 64MB which
+    # is way too small for vLLM's multi-process IPC; engine cores fail to start.
+    # Without these, you get: "Engine core initialization failed, Failed core proc(s): {}"
+    ipc: host
+    ulimits:
+      memlock: -1
+      stack: 67108864
     networks: [apex]
     restart: unless-stopped
     deploy:
