@@ -26,8 +26,12 @@ services:
     environment:
       HF_TOKEN: ${HF_TOKEN}
       HF_HUB_ENABLE_HF_TRANSFER: "1"
+      HF_HOME: /data/hf-cache       # points HF lib at the bind-mounted cache below
     volumes:
-      - /data/hf-cache:/root/.cache/huggingface
+      # Mount the WHOLE /data/models tree so the container sees both:
+      #   /data/hf-cache    (HF cache layout — for VLLM_MODEL=Qwen/Qwen3-32B-AWQ style)
+      #   /data/local       (flat dirs from hf-curl-download.sh — for VLLM_MODEL=/data/local/<repo>)
+      - /data/models:/data
     networks: [apex]
     restart: unless-stopped
     deploy:
@@ -78,8 +82,11 @@ services:
     command: ["--model-id", "${TEI_MODEL}"]
     environment:
       HF_TOKEN: ${HF_TOKEN}
-      HF_HOME: /data
+      HF_HOME: /data/hf-cache       # points HF lib at the bind-mounted cache below
     volumes:
-      - /data/models/hf-cache:/data            # shared HF cache (pre-downloaded)
+      # Same as vllm — see explanation above. TEI_MODEL can be either:
+      #   BAAI/bge-m3                   (HF cache layout under /data/hf-cache)
+      #   /data/local/bge-m3            (flat dir from hf-curl-download.sh)
+      - /data/models:/data
     networks: [apex]
     restart: unless-stopped
