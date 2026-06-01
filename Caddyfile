@@ -30,19 +30,23 @@
 	}
 
 	# open-webui — browser chat UI for vLLM (prefix preserved; webui serves at /chat sub-path).
+	# `redir` makes /chat (no slash) work too — Caddy's `handle /path/*` doesn't
+	# match the bare prefix, so without this users typing /chat get the default fallback.
+	redir /chat /chat/ 308
 	handle /chat/* {
 		reverse_proxy open-webui:8080
+	}
+
+	# Grafana — prefix preserved (Grafana serves from /grafana sub-path).
+	redir /grafana /grafana/ 308
+	handle /grafana/* {
+		reverse_proxy grafana:3000
 	}
 
 	# Additional APEX application(s) — add routes here as you add services to compose.apps.yml.
 	# handle_path /apex/* {
 	# 	reverse_proxy my-app:8080
 	# }
-
-	# Grafana — prefix preserved (Grafana serves from /grafana sub-path).
-	handle /grafana/* {
-		reverse_proxy grafana:3000
-	}
 
 	# default
 	respond "apex-spark-01 gateway" 200
