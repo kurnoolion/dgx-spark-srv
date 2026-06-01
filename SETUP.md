@@ -316,13 +316,14 @@ docker images | grep caddy                 # should show: caddy 2 <id> ...
 
 #### Then pull in two batches — public registries first, NGC second
 
-**Public-registry images (no auth — 10 of 12 — TEI is disabled, see note below):**
+**Public-registry images (no auth — 11 of 13):**
 ```bash
 make pull-stack images='postgres:16 redis:7 qdrant/qdrant:latest \
   minio/minio:latest ollama/ollama:latest grafana/grafana:latest \
   prom/prometheus:latest prom/node-exporter:latest \
   caddy:2 \
-  gcr.io/cadvisor/cadvisor:v0.49.1'
+  gcr.io/cadvisor/cadvisor:v0.49.1 \
+  ghcr.io/open-webui/open-webui:main'
 ```
 
 > **TEI** is included in the stack but **must be built from source** —
@@ -349,8 +350,8 @@ make pull-stack images='nvcr.io/nvidia/vllm:25.11-py3 \
 #### Verify the 12 pulled images landed
 ```bash
 docker images | sort
-# expect 12 entries (the stack minus TEI), each with proper REPOSITORY:TAG
-# (TEI will be built locally in B2-build below → 13 total after that)
+# expect 13 entries (the stack minus TEI), each with proper REPOSITORY:TAG
+# (TEI will be built locally in B2-build below → 14 total after that)
 ```
 
 ### B2-build. Build TEI from source (no arm64 prebuilt exists)

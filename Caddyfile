@@ -24,11 +24,14 @@
 		reverse_proxy ollama:11434
 	}
 
-	# APEX application(s).
-	# Currently no app is defined (compose.apps.yml is empty). Once you add an
-	# app there, uncomment + adjust the backend name/port below.
+	# open-webui — browser chat UI for vLLM (prefix preserved; webui serves at /chat sub-path).
+	handle /chat/* {
+		reverse_proxy open-webui:8080
+	}
+
+	# Additional APEX application(s) — add routes here as you add services to compose.apps.yml.
 	# handle_path /apex/* {
-	# 	reverse_proxy example-app:8080
+	# 	reverse_proxy my-app:8080
 	# }
 
 	# Grafana — prefix preserved (Grafana serves from /grafana sub-path).

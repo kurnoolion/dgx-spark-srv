@@ -74,6 +74,7 @@ make vllm-start    # reclaims the configured VLLM_GPU_UTIL slice
 | `/v1/*` | vLLM :8000 | OpenAI-compatible chat/completions |
 | `/ollama/*` | Ollama :11434 | Ollama API |
 | `/embed/*` | TEI :80 | embeddings for RAG |
+| `/chat/*` | open-webui :8080 | browser chat UI for vLLM (first signup → admin) |
 | `/apex/*` | *(not wired)* | reserved for your apps; uncomment in `Caddyfile` after adding to `compose.apps.yml` |
 | `/grafana/*` | Grafana :3000 | dashboards (browser auth) |
 

@@ -24,12 +24,13 @@ COMPOSE   := docker compose $(CORE) $(INFER) $(GATEWAY) $(APPS) $(OBS)
 # Postgres/MinIO run as root then drop privileges, so root-owned dirs are fine;
 # Redis runs as uid 999 and needs ownership of its dir.
 init:
-	sudo mkdir -p /data/srv/data/{postgres,redis,qdrant,qdrant-snapshots,minio,caddy,caddy-config,prometheus,grafana}
+	sudo mkdir -p /data/srv/data/{postgres,redis,qdrant,qdrant-snapshots,minio,caddy,caddy-config,prometheus,grafana,open-webui}
 	sudo mkdir -p /data/models/{hf-cache,ollama,shared,local}
 	sudo mkdir -p /data/home
 	sudo chown -R 999:999 /data/srv/data/redis
 	sudo chown -R 65534:65534 /data/srv/data/prometheus   # prometheus runs as nobody
 	sudo chown -R 472:472 /data/srv/data/grafana          # grafana runs as uid 472
+	sudo chown -R 1000:1000 /data/srv/data/open-webui     # open-webui runs as uid 1000
 	sudo groupadd -f ml-users
 	sudo chgrp ml-users /data/models/shared /data/models/hf-cache /data/models/ollama /data/models/local
 	sudo chmod 2775     /data/models/shared /data/models/hf-cache /data/models/ollama /data/models/local

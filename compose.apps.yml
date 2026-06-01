@@ -1,34 +1,37 @@
-# Your web / backend apps. Each must be arm64 / multi-arch.
-#
-# This file is currently EMPTY (no service definitions). Add your real APEX
-# services here (DeliverableHub, req-agent, telecom RAG Q&A frontend, etc.)
-# using the example pattern at the bottom of this file as a template.
+# Web / backend apps. Each must be arm64 / multi-arch.
 #
 # The 'apex' external network gives apps access to:
 #   vllm:8000   — OpenAI-compatible LLM API
 #   tei:80      — embeddings (bge-m3)
 #   ollama:11434 — Ollama API
 #   postgres:5432, redis:6379, qdrant:6333, minio:9000 — data services
-#
-# Caddy routes /apex/* to the first app named 'example-app'; change the route
-# in Caddyfile if you use a different name.
 networks:
   apex:
     name: apex
-    external: true     # this file is loaded alone sometimes; declare network external
+    external: true
 
-services: {}
+services:
+  # ── open-webui — browser chat UI talking to vLLM (OpenAI-compatible) ──
+  # Reached via Caddy at https://${SITE_HOST}/chat
+  # First user to sign up becomes admin (WEBUI_AUTH=true).
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    environment:
+      OPENAI_API_BASE_URL: http://vllm:8000/v1
+      OPENAI_API_KEY: dummy                  # vLLM doesn't validate; any value works
+      WEBUI_AUTH: "true"                     # first signup → admin
+      WEBUI_NAME: "APEX Spark"
+      WEBUI_URL: "https://${SITE_HOST}/chat" # used in email links + auth callbacks
+      ENABLE_OLLAMA_API: "false"             # we expose Ollama separately at /ollama
+    volumes:
+      - /data/srv/data/open-webui:/app/backend/data
+    networks: [apex]
+    restart: unless-stopped
 
-# ─── Example template — uncomment + adjust to add your first app ────────────
-#
-# Build context approach:
-#   mkdir -p apps/example-app
-#   # put a Dockerfile FROM python:3.12-slim (or node:22-slim) at apps/example-app/Dockerfile
-#
+# ─── Adding more apps — template ────────────────────────────────────────────
 # services:
-#   example-app:
-#     build:
-#       context: ./apps/example-app
+#   my-app:
+#     build: { context: ./apps/my-app }     # OR  image: <prebuilt-image>
 #     environment:
 #       DATABASE_URL: postgresql://${PG_USER}:${PG_PW}@postgres:5432/${PG_DB}
 #       REDIS_URL: redis://redis:6379/0
@@ -38,4 +41,4 @@ services: {}
 #       HF_TOKEN: ${HF_TOKEN}
 #     networks: [apex]
 #     restart: unless-stopped
-#     # no published ports — only Caddy is exposed; reached internally at http://example-app:8080
+#     # no published ports — Caddy reaches internally at http://my-app:<port>

@@ -171,11 +171,12 @@ info "/home -> /data/home active."
 
 # ───────────────────────── bind-mount directories ─────────────────────────
 step "Create service + model directories"
-mkdir -p /data/srv/data/{postgres,redis,qdrant,qdrant-snapshots,minio,caddy,caddy-config,prometheus,grafana}
+mkdir -p /data/srv/data/{postgres,redis,qdrant,qdrant-snapshots,minio,caddy,caddy-config,prometheus,grafana,open-webui}
 mkdir -p /data/models/{hf-cache,ollama,shared,local}
 chown -R "${REDIS_UID}:${REDIS_UID}" /data/srv/data/redis   # redis runs as uid 999
 chown -R 65534:65534 /data/srv/data/prometheus             # prometheus runs as nobody
 chown -R 472:472     /data/srv/data/grafana                # grafana runs as uid 472
+chown -R 1000:1000   /data/srv/data/open-webui             # open-webui runs as uid 1000
 getent group "$ML_GROUP" >/dev/null || groupadd "$ML_GROUP"
 # Make ALL shared model dirs writable by ml-users: hf-cache + ollama models + the
 # user dropzone. setgid (2775) so new files inherit ml-users group automatically.

@@ -13,8 +13,7 @@ cd "$(dirname "$0")"
 DISK_WARN="${DISK_WARN:-85}"
 GPU_TEMP_WARN="${GPU_TEMP_WARN:-80}"
 COMPOSE="docker compose -f docker-compose.yml -f compose.inference.yml -f compose.gateway.yml -f compose.apps.yml -f compose.observability.yml"
-SERVICES="postgres redis qdrant minio vllm ollama tei caddy prometheus grafana cadvisor node-exporter dcgm-exporter"
-# NOTE: example-app removed — compose.apps.yml is empty by default; add your apps then re-add here.
+SERVICES="postgres redis qdrant minio vllm ollama tei caddy open-webui prometheus grafana cadvisor node-exporter dcgm-exporter"
 
 fails=0; warns=0
 ok()   { printf '  \e[32mPASS\e[0m %s\n' "$*"; }
