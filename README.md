@@ -78,6 +78,31 @@ make vllm-start    # reclaims the configured VLLM_GPU_UTIL slice
 | `/apex/*` | *(not wired)* | reserved for your apps; uncomment in `Caddyfile` after adding to `compose.apps.yml` |
 | `/grafana/*` | Grafana :3000 | dashboards (browser auth) |
 
+## Reaching the stack from other machines
+
+**Always use the hostname (`$SITE_HOST`) in URLs, never the raw IP.** Caddy's
+TLS stack (Go crypto/tls) has a long-standing issue with IP-literal SNI —
+`openssl s_client` works, but `curl`/`wget`/Python clients fail with
+`tlsv1 alert internal error` when the URL is `https://<ip>/`. Hostname SNI
+works for every client.
+
+To make this work on every machine that needs access:
+
+- **DNS** (cleanest): get an A record `apex-spark-01.<corp-domain>` →
+  spark's IP in corp DNS.
+- **mDNS** (zero-config on LAN): `sudo apt install avahi-daemon` on the
+  spark; Linux/Mac machines auto-resolve `apex-spark-01.local`.
+- **`/etc/hosts`** (simplest, per-machine): add one line on every client.
+  ```
+  <spark-ip>  apex-spark-01.local
+  ```
+  Windows: `C:\Windows\System32\drivers\etc\hosts` (edit as Admin).
+
+`.env` should always have `SITE_HOST=apex-spark-01.local` (or your real
+hostname) — never the IP. The `SITE_ADDRESSES` extension point exists for
+listing multiple hostnames if you want, but **don't put an IP in there**;
+the cert gets issued but clients can't use it.
+
 ## Securing the gateway
 The gateway is **currently unauthenticated** — `Caddyfile` proxies directly to
 each backend. This is only acceptable if the box lives on a trusted VPN /
