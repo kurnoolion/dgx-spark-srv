@@ -25,9 +25,11 @@
 	}
 
 	# APEX application(s).
-	handle_path /apex/* {
-		reverse_proxy example-app:8080
-	}
+	# Currently no app is defined (compose.apps.yml is empty). Once you add an
+	# app there, uncomment + adjust the backend name/port below.
+	# handle_path /apex/* {
+	# 	reverse_proxy example-app:8080
+	# }
 
 	# Grafana — prefix preserved (Grafana serves from /grafana sub-path).
 	handle /grafana/* {

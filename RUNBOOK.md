@@ -48,7 +48,7 @@ make restart svc=<name> # one service
 make logs svc=<name>    # follow logs (Ctrl-C to stop)
 make deploy             # git pull-equivalent: pull images + recreate
 ```
-Service names: `postgres redis qdrant minio vllm ollama tei caddy example-app prometheus grafana cadvisor node-exporter dcgm-exporter`.
+Service names: `postgres redis qdrant minio vllm ollama tei caddy prometheus grafana cadvisor node-exporter dcgm-exporter` (+ your apps from `compose.apps.yml` once you add them).
 
 Internal endpoints are **not** published to the host (only Caddy's 443/80 are).
 To probe a backend directly:

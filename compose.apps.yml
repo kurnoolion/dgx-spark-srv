@@ -1,20 +1,41 @@
 # Your web / backend apps. Each must be arm64 / multi-arch.
-# Example shows the pattern: build from an arm64 base, join the apex network,
-# let Caddy route to it. Replace with real APEX services (DeliverableHub, req-agent, ...).
+#
+# This file is currently EMPTY (no service definitions). Add your real APEX
+# services here (DeliverableHub, req-agent, telecom RAG Q&A frontend, etc.)
+# using the example pattern at the bottom of this file as a template.
+#
+# The 'apex' external network gives apps access to:
+#   vllm:8000   — OpenAI-compatible LLM API
+#   tei:80      — embeddings (bge-m3)
+#   ollama:11434 — Ollama API
+#   postgres:5432, redis:6379, qdrant:6333, minio:9000 — data services
+#
+# Caddy routes /apex/* to the first app named 'example-app'; change the route
+# in Caddyfile if you use a different name.
 networks:
   apex:
     name: apex
+    external: true     # this file is loaded alone sometimes; declare network external
 
-services:
-  example-app:
-    build:
-      context: ./apps/example-app    # contains a Dockerfile FROM python:3.12-slim
-    environment:
-      DATABASE_URL: postgresql://${PG_USER}:${PG_PW}@postgres:5432/${PG_DB}
-      REDIS_URL: redis://redis:6379/0
-      QDRANT_URL: http://qdrant:6333
-      VLLM_BASE_URL: http://vllm:8000/v1
-      TEI_URL: http://tei:80
-    networks: [apex]
-    restart: unless-stopped
-    # no ports: — only Caddy is exposed; reached internally at http://example-app:8080
+services: {}
+
+# ─── Example template — uncomment + adjust to add your first app ────────────
+#
+# Build context approach:
+#   mkdir -p apps/example-app
+#   # put a Dockerfile FROM python:3.12-slim (or node:22-slim) at apps/example-app/Dockerfile
+#
+# services:
+#   example-app:
+#     build:
+#       context: ./apps/example-app
+#     environment:
+#       DATABASE_URL: postgresql://${PG_USER}:${PG_PW}@postgres:5432/${PG_DB}
+#       REDIS_URL: redis://redis:6379/0
+#       QDRANT_URL: http://qdrant:6333
+#       VLLM_BASE_URL: http://vllm:8000/v1
+#       TEI_URL: http://tei:80
+#       HF_TOKEN: ${HF_TOKEN}
+#     networks: [apex]
+#     restart: unless-stopped
+#     # no published ports — only Caddy is exposed; reached internally at http://example-app:8080
