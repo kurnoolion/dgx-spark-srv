@@ -29,14 +29,6 @@
 		reverse_proxy ollama:11434
 	}
 
-	# open-webui — browser chat UI for vLLM (prefix preserved; webui serves at /chat sub-path).
-	# `redir` makes /chat (no slash) work too — Caddy's `handle /path/*` doesn't
-	# match the bare prefix, so without this users typing /chat get the default fallback.
-	redir /chat /chat/ 308
-	handle /chat/* {
-		reverse_proxy open-webui:8080
-	}
-
 	# Grafana — prefix preserved (Grafana serves from /grafana sub-path).
 	redir /grafana /grafana/ 308
 	handle /grafana/* {
@@ -48,6 +40,12 @@
 	# 	reverse_proxy my-app:8080
 	# }
 
-	# default
-	respond "apex-spark-01 gateway" 200
+	# open-webui at ROOT — its assets hard-code /static/ and /assets/ paths that
+	# don't survive sub-path serving, so it must be at /. Everything above this
+	# (handle/handle_path) is matched first by Caddy; only unmatched requests
+	# (including /, /static/*, /assets/*, /_app/*, /api/*, the SPA itself) hit
+	# open-webui. The old /chat URL redirects here for backward-compat.
+	redir /chat /  301
+	redir /chat/ / 301
+	reverse_proxy open-webui:8080
 }

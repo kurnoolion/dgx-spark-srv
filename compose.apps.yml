@@ -21,7 +21,7 @@ services:
       OPENAI_API_KEY: dummy                  # vLLM doesn't validate; any value works
       WEBUI_AUTH: "true"                     # first signup → admin
       WEBUI_NAME: "APEX Spark"
-      WEBUI_URL: "https://${SITE_HOST}/chat" # used in email links + auth callbacks
+      WEBUI_URL: "https://${SITE_HOST}"      # served at site root (open-webui doesn't sub-path cleanly)
       ENABLE_OLLAMA_API: "false"             # we expose Ollama separately at /ollama
       # RAG embeddings — use TEI (already running bge-m3) instead of downloading
       # the default all-MiniLM-L6-v2 from HF. Avoids first-start hang on this
