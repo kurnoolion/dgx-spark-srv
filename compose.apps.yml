@@ -23,6 +23,15 @@ services:
       WEBUI_NAME: "APEX Spark"
       WEBUI_URL: "https://${SITE_HOST}/chat" # used in email links + auth callbacks
       ENABLE_OLLAMA_API: "false"             # we expose Ollama separately at /ollama
+      # RAG embeddings — use TEI (already running bge-m3) instead of downloading
+      # the default all-MiniLM-L6-v2 from HF. Avoids first-start hang on this
+      # proxy-restricted box AND uses the same embedder as our app code.
+      RAG_EMBEDDING_ENGINE: "openai"
+      RAG_OPENAI_API_BASE_URL: "http://tei:80"
+      RAG_OPENAI_API_KEY: "dummy"
+      RAG_EMBEDDING_MODEL: "${TEI_MODEL}"
+      # Pass HF token so anything that *does* need HF (re-rankers etc.) authenticates
+      HF_TOKEN: "${HF_TOKEN}"
     volumes:
       - /data/srv/data/open-webui:/app/backend/data
     networks: [apex]
