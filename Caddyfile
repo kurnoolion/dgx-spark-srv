@@ -6,7 +6,12 @@
 # If you ever need auth back, see git history for the oauth2-proxy version, or
 # add `basicauth` blocks per route, or restore forward_auth to an auth proxy.
 
-{$SITE_HOST} {
+{$SITE_HOST}, {$SITE_HOST_ALIAS:} {
+	# `tls internal` issues a self-signed cert from Caddy's internal CA. Auto-HTTPS
+	# fires off SITE_HOST (the hostname); when SITE_HOST_ALIAS is also set (typically
+	# an IP), the issued cert has that IP in SANs too so https://<ip>/ also works.
+	# The trailing `:` on SITE_HOST_ALIAS makes the var OPTIONAL — leave it blank in
+	# .env to bind hostname-only.
 	tls internal
 
 	# OpenAI-compatible LLM API (vLLM) — /v1 path preserved.
