@@ -6,12 +6,12 @@
 # If you ever need auth back, see git history for the oauth2-proxy version, or
 # add `basicauth` blocks per route, or restore forward_auth to an auth proxy.
 
-{$SITE_HOST}, {$SITE_HOST_ALIAS:} {
-	# `tls internal` issues a self-signed cert from Caddy's internal CA. Auto-HTTPS
-	# fires off SITE_HOST (the hostname); when SITE_HOST_ALIAS is also set (typically
-	# an IP), the issued cert has that IP in SANs too so https://<ip>/ also works.
-	# The trailing `:` on SITE_HOST_ALIAS makes the var OPTIONAL — leave it blank in
-	# .env to bind hostname-only.
+{$SITE_ADDRESSES} {
+	# Single comma-separated list — Caddy parses it as multiple site addresses
+	# and issues one cert from its internal CA with all of them in the SAN list.
+	# Default (in .env.example): SITE_ADDRESSES=${SITE_HOST}  (hostname only)
+	# Multi-access: SITE_ADDRESSES=apex-spark-01.local, 10.x.x.x  (hostname + IP)
+	# Note: WEBUI_URL in compose.apps.yml still uses SITE_HOST (single value).
 	tls internal
 
 	# OpenAI-compatible LLM API (vLLM) — /v1 path preserved.

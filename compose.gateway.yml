@@ -16,5 +16,8 @@ services:
       - /data/srv/data/caddy-config:/config
     environment:
       SITE_HOST: ${SITE_HOST}
+      # Caddy uses SITE_ADDRESSES as its site-address line. Defaults to SITE_HOST
+      # if not explicitly set. Set to "host, ip" in .env to bind both.
+      SITE_ADDRESSES: ${SITE_ADDRESSES:-${SITE_HOST}}
     networks: [apex]
     restart: unless-stopped
