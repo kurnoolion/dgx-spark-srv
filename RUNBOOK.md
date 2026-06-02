@@ -16,6 +16,7 @@ cd /data/srv
 | Daily health check | `make health` |
 | Status of everything | `make ps` |
 | GPU usage (live) | `watch -n2 nvidia-smi` |
+| Live vLLM monitor (GPU + KV cache + queue) | `make watch-vllm` |
 | Tail one service | `make logs svc=vllm` |
 | Restart one service | `make restart svc=qdrant` |
 | Bring stack up / down | `make up` / `make down` |
