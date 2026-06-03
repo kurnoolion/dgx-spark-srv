@@ -29,12 +29,30 @@ print_state() {
     --format "  CPU={{.CPUPerc}}   MEM={{.MemUsage}} ({{.MemPerc}})   PIDS={{.PIDs}}" \
     2>/dev/null || echo "  srv-vllm-1 container not running"
 
-  printf '\n── vLLM internals (KV cache %%, queued / running / swapped) ─────\n'
-  docker compose -f compose.inference.yml exec -T vllm \
-    curl -fsS http://localhost:8000/metrics 2>/dev/null \
-    | grep -E '^vllm:(gpu_cache_usage_perc|num_requests_running|num_requests_waiting|num_requests_swapped) ' \
-    | awk '{printf "  %-50s %s\n", $1, $2}' \
-    || echo "  /metrics unreachable (model still loading, or vllm down?)"
+  printf '\n── vLLM internals (cache + request stats from /metrics) ─────────\n'
+  local metrics
+  metrics=$(docker compose -f compose.inference.yml exec -T vllm \
+              curl -fsS http://localhost:8000/metrics 2>/dev/null || true)
+  if [[ -z "$metrics" ]]; then
+    echo "  /metrics endpoint unreachable (vllm down or not yet listening?)"
+  else
+    # Prefer specific well-known names; fall back to all vllm: gauges if names differ across versions.
+    local interesting
+    interesting=$(echo "$metrics" \
+      | grep -E '^vllm:(gpu_cache_usage_perc|kv_cache_usage_perc|num_requests_running|num_requests_waiting|num_requests_swapped|prefix_cache_hit_rate|prefix_cache_queries) ' \
+      | head -10)
+    if [[ -z "$interesting" ]]; then
+      interesting=$(echo "$metrics" \
+        | grep '^vllm:' \
+        | grep -vE '_(bucket|count|sum|created)( |\{)' \
+        | head -8)
+    fi
+    if [[ -z "$interesting" ]]; then
+      echo "  /metrics has no vllm:* gauges (build moved them — raw probe still useful)"
+    else
+      echo "$interesting" | awk '{printf "  %-55s %s\n", $1, $2}'
+    fi
+  fi
 }
 
 trap 'echo; echo "[exited]"; exit 0' INT TERM
