@@ -87,11 +87,15 @@ framebuffer. Use it to capture real per-service RAM before finalizing the split.
 Quick PromQL (Explore tab):
 ```promql
 topk(10, container_memory_working_set_bytes{name!=""})          # hungriest services
-100*(1 - node_memory_MemAvailable_bytes/node_memory_MemTotal_bytes)  # host mem %
-DCGM_FI_DEV_FB_USED                                              # GPU mem (MiB)
+100*(1 - node_memory_MemAvailable_bytes/node_memory_MemTotal_bytes)  # host=GPU mem %
+DCGM_FI_DEV_GPU_UTIL                                             # compute saturation %
+DCGM_FI_DEV_MEM_COPY_UTIL                                        # GPU mem-bandwidth %
+DCGM_FI_DEV_GPU_TEMP                                             # °C
+DCGM_FI_DEV_POWER_USAGE                                          # W
 ```
-If `dcgm-exporter` won't start (tag/arch on GB10), GPU panels go blank but
-everything else works — GPU memory is still visible via `nvidia-smi`/`make health`.
+**No GPU framebuffer metric on GB10** — unified memory means the GPU has no
+separate framebuffer to report. `DCGM_FI_DEV_FB_USED` does not exist on this
+hardware; host memory % IS GPU memory %. The dashboard reflects this.
 Community dashboards to import by ID if you want more: node 1860, cAdvisor 14282.
 
 ## Memory rebalancing (vLLM ↔ Ollama)

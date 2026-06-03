@@ -34,13 +34,18 @@ services:
     restart: unless-stopped
 
   # Per-container CPU/memory/net/disk — the source of per-service memory metrics.
+  # v0.52+ is required: v0.49 fails to enumerate Docker containers on Ubuntu 24.04
+  # (cgroup v2), producing only the root cgroup ("id=/") and no per-container rows.
+  # Explicit docker.sock + cgroup mounts are likewise mandatory; the previous
+  # /var/run:/var/run mapping doesn't suffice for cAdvisor's Docker discovery.
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.49.1   # verify arm64 tag exists for your pull
-    command: ["-housekeeping_interval=15s", "-docker_only=true"]
+    image: gcr.io/cadvisor/cadvisor:v0.52.0
+    command: ["--housekeeping_interval=15s", "--docker_only=true"]
     volumes:
       - /:/rootfs:ro
-      - /var/run:/var/run:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
       - /sys:/sys:ro
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
       - /var/lib/docker/:/var/lib/docker:ro
       - /dev/disk/:/dev/disk:ro
     devices: ["/dev/kmsg"]

@@ -42,7 +42,7 @@
     {
       "id": 3,
       "type": "timeseries",
-      "title": "Host memory used % (of 128 GB unified pool)",
+      "title": "Host = GPU memory used % (128 GB unified pool, shared)",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
       "fieldConfig": { "defaults": { "unit": "percent", "max": 100 }, "overrides": [] },
@@ -58,15 +58,56 @@
     {
       "id": 4,
       "type": "timeseries",
-      "title": "GPU framebuffer memory used (DCGM, MiB)",
+      "title": "GPU utilization — compute & memory bandwidth (DCGM, %)",
+      "description": "GB10 has unified memory, so there is no separate GPU framebuffer to chart. These two utilization signals are the actionable GPU metrics: compute % shows whether the SMs are saturated (the relevant ceiling for inference); memory-bandwidth % shows whether the GPU is bandwidth-bound moving weights/KV cache. For memory *capacity* used, see the Host=GPU memory panel — it is the same pool.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
-      "fieldConfig": { "defaults": { "unit": "mbytes" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "unit": "percent", "max": 100 }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "DCGM_FI_DEV_FB_USED",
+          "expr": "DCGM_FI_DEV_GPU_UTIL",
+          "legendFormat": "compute util (GPU {{gpu}})"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "DCGM_FI_DEV_MEM_COPY_UTIL",
+          "legendFormat": "memory bandwidth util (GPU {{gpu}})"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "GPU temperature (DCGM, °C)",
+      "description": "Throttling kicks in around 85-87°C. Sustained 80+°C under load is the early-warning sign.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 26 },
+      "fieldConfig": { "defaults": { "unit": "celsius" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "DCGM_FI_DEV_GPU_TEMP",
+          "legendFormat": "GPU {{gpu}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "GPU power draw (DCGM, W)",
+      "description": "Proxy for actual workload intensity — flatlining at TDP means the GPU is doing as much work as it can.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 26 },
+      "fieldConfig": { "defaults": { "unit": "watt" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "DCGM_FI_DEV_POWER_USAGE",
           "legendFormat": "GPU {{gpu}}"
         }
       ]

@@ -124,10 +124,12 @@ If you later need auth, three lightweight options:
 Prometheus + Grafana + exporters (cAdvisor, node-exporter, dcgm-exporter) come up
 with `make up`. Grafana is at `https://$SITE_HOST/grafana` (login `admin` /
 `GRAFANA_PASSWORD`), with a provisioned **Service Memory** dashboard: per-container
-memory, memory vs. limit, host memory (the 128 GB unified pool), and GPU
-framebuffer. Set `GRAFANA_PASSWORD` in `.env`. Own footprint ~1.5 GB; TSDB capped
-at 15-day retention. This is how you'll measure the real per-service RAM before
-finalizing the memory split.
+memory, memory vs. limit, the 128 GB unified pool (= GPU memory on GB10), GPU
+compute/memory-bandwidth utilization, temperature, and power. Set
+`GRAFANA_PASSWORD` in `.env`. Own footprint ~1.5 GB; TSDB capped at 15-day
+retention. This is how you'll measure the real per-service RAM before finalizing
+the memory split. Note: GB10's unified memory means there is **no separate GPU
+framebuffer metric** — host memory % IS GPU memory %.
 
 ## Adding a service
 1. Confirm arm64: `docker manifest inspect <image> | grep arm64`
