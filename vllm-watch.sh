@@ -20,14 +20,19 @@ INTERVAL="${1:-2}"
 print_state() {
   printf '%s   vLLM watch (refresh %ss · Ctrl-C to exit)\n' "$(date +%H:%M:%S)" "$INTERVAL"
 
-  printf '\n── GPU (memory MiB, util %%) ────────────────────────────────────\n'
-  nvidia-smi --query-gpu=memory.used,memory.free,memory.total,utilization.gpu \
-    --format=csv,nounits 2>/dev/null || echo "  nvidia-smi unavailable"
+  printf '\n── Unified memory pool (GPU+CPU share this) ─────────────────────\n'
+  # On DGX Spark / GB10 nvidia-smi can't separate GPU memory — they're the same
+  # pool. `free -h` is the authoritative number; nvidia-smi gives util %% only.
+  free -h | awk 'NR==1 || /^Mem:/ {print "  "$0}'
+  local gpu_util
+  gpu_util=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null) \
+    && printf "  GPU util: %s%%\n" "$gpu_util"
 
-  printf '\n── vLLM container ───────────────────────────────────────────────\n'
+  printf '\n── vLLM container (process-level only — NOT GPU allocation) ─────\n'
   docker stats srv-vllm-1 --no-stream \
-    --format "  CPU={{.CPUPerc}}   MEM={{.MemUsage}} ({{.MemPerc}})   PIDS={{.PIDs}}" \
+    --format "  CPU={{.CPUPerc}}   container-MEM={{.MemUsage}} ({{.MemPerc}})   PIDS={{.PIDs}}" \
     2>/dev/null || echo "  srv-vllm-1 container not running"
+  echo "  (vLLM's 96 GB stake doesn't show here on unified memory — see 'free' above)"
 
   printf '\n── vLLM internals (cache + request stats from /metrics) ─────────\n'
   local metrics
