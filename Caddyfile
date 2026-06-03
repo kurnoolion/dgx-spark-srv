@@ -60,7 +60,7 @@ http://{$SITE_ADDRESSES} {
 	# (handle/handle_path) is matched first by Caddy; only unmatched requests
 	# (including /, /static/*, /assets/*, /_app/*, /api/*, the SPA itself) hit
 	# open-webui. The old /chat URL redirects here for backward-compat.
-	redir /chat /  301
+	redir /chat / 301
 	redir /chat/ / 301
 	reverse_proxy open-webui:8080
 }
