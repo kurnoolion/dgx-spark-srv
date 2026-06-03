@@ -71,7 +71,7 @@ make vllm-start    # reclaims the configured VLLM_GPU_UTIL slice
 ## Routes (via Caddy, https://$SITE_HOST)
 | Path | Backend | Use |
 |---|---|---|
-| `/v1/*` | vLLM :8000 | OpenAI-compatible chat/completions |
+| `/v1/*` | vLLM :8000 | OpenAI-compatible chat/completions. **Also served on plain HTTP** (`http://$SITE_HOST/v1/*`) so cert-averse clients (SIRA, generic scripts) can skip TLS. Other paths on HTTP redirect to HTTPS. |
 | `/ollama/*` | Ollama :11434 | Ollama API |
 | `/embed/*` | TEI :80 | embeddings for RAG |
 | `/` (root + anything unmatched) | open-webui :8080 | browser chat UI for vLLM (first signup → admin). `/chat` redirects to `/` for backward-compat. |

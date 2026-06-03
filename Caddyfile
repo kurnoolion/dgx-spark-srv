@@ -6,6 +6,21 @@
 # If you ever need auth back, see git history for the oauth2-proxy version, or
 # add `basicauth` blocks per route, or restore forward_auth to an auth proxy.
 
+# ── Plain-HTTP exception for vLLM ────────────────────────────────────────────
+# vLLM's /v1/* is also served on plain HTTP (port 80) so OpenAI-compatible
+# clients can avoid the self-signed-cert dance (e.g. SIRA on the HP box can
+# drop verify=False and use http://apex-spark-01.local/v1 directly).
+# All other paths on HTTP redirect to HTTPS — the relaxation is scoped to
+# vLLM only. Remove this block to go back to HTTPS-everywhere.
+http://{$SITE_ADDRESSES} {
+	handle /v1/* {
+		reverse_proxy vllm:8000
+	}
+	handle {
+		redir https://{host}{uri} 308
+	}
+}
+
 {$SITE_ADDRESSES} {
 	# Single comma-separated list — Caddy parses it as multiple site addresses
 	# and issues one cert from its internal CA with all of them in the SAN list.
