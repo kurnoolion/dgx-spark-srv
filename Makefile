@@ -18,7 +18,7 @@ APPS      := -f compose.apps.yml
 OBS       := -f compose.observability.yml
 COMPOSE   := docker compose $(CORE) $(INFER) $(GATEWAY) $(APPS) $(OBS)
 
-.PHONY: init up down restart logs ps pull deploy models gpu health rebalance vllm-stop vllm-start backup prune prune-status install-system download-models pull-stack watch-vllm
+.PHONY: init up down restart logs ps pull deploy models gpu health rebalance vllm-stop vllm-start backup prune prune-status install-system download-models pull-stack watch-vllm watch-vllm-load
 
 # Create the bind-mount directories before first `up`. Run once.
 # Postgres/MinIO run as root then drop privileges, so root-owned dirs are fine;
@@ -90,6 +90,12 @@ gpu:
 # Default refresh 2s; override with `make watch-vllm interval=5`.
 watch-vllm:
 	./vllm-watch.sh $(interval)
+
+# Saturation-focused subset for load testing: queue / cache / preemptions /
+# GPU util / mem only, with inline thresholds. Default 1s refresh.
+# Override: `make watch-vllm-load interval=2`.
+watch-vllm-load:
+	./vllm-watch-load.sh $(interval)
 
 # Daily health checks: services, GPU, disk, /data quotas, inference endpoints.
 # PASS/WARN/FAIL output; exits non-zero on any FAIL (usable from cron).

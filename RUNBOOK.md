@@ -17,6 +17,7 @@ cd /data/srv
 | Status of everything | `make ps` |
 | GPU usage (live) | `watch -n2 nvidia-smi` |
 | Live vLLM monitor (GPU + KV cache + queue) | `make watch-vllm` |
+| Saturation-only vLLM monitor (during load tests) | `make watch-vllm-load` |
 | Tail one service | `make logs svc=vllm` |
 | Restart one service | `make restart svc=qdrant` |
 | Bring stack up / down | `make up` / `make down` |

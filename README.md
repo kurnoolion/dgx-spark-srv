@@ -151,7 +151,8 @@ symptom→fix troubleshooting table.
 - `install-system.sh` (`make install-system`) — docker log rotation + journald cap
 - `system/` — `daemon.json`, `journald-apex.conf` (installed by the above)
 - `health.sh` (`make health`) — daily health checks / cron probe
-- `vllm-watch.sh` (`make watch-vllm`) — live vLLM memory + KV cache + queue monitor
+- `vllm-watch.sh` (`make watch-vllm`) — live vLLM memory + KV cache + queue monitor (full view)
+- `vllm-watch-load.sh` (`make watch-vllm-load`) — saturation-focused subset for load tests
 - `backup.sh` (`make backup`) — backups (see RUNBOOK.md)
 - `download-models.sh` (`make download-models`) — bulk HF model pre-download
 - `skopeo-pull-stack.sh` (`make pull-stack`) — pull all stack images via skopeo (proxy fallback when `docker pull` fails)
