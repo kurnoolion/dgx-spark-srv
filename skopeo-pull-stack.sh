@@ -46,9 +46,14 @@ else
     grep -rhE '^[[:space:]]+image:[[:space:]]' compose*.yml docker-compose.yml 2>/dev/null \
       | awk '{print $2}' \
       | sed 's/[#"'"'"'].*$//' | sed 's/[[:space:]]//g' \
+      | grep -v '\$' \
       | sort -u
   )
 fi
+# The grep -v '$' above drops images defined via ${VAR} substitution (e.g.
+# ${TEI_IMAGE:-local/tei:cpu-arm64}). Those are locally-built / sneakernet-
+# loaded by design and have no upstream registry to pull from. If you need to
+# pull a real var-substituted image, pass it explicitly on the CLI.
 
 (( ${#IMAGES[@]} > 0 )) || { log "ERROR no images found (in compose files? pass IDs on CLI)"; exit 1; }
 
