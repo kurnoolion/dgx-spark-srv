@@ -110,8 +110,13 @@ docker compose -f compose.inference.yml exec -T vllm \
 **TEI reranker** (`tei-reranker` service, route `/rerank/*`) runs in its own
 container using the same TEI image as the embedder but pointed at a
 cross-encoder model. CPU-only — no GPU stake, doesn't compete with
-vLLM/Ollama. Default model `bge-reranker-v2-m3` (~568M params; ~100-300ms
-to rerank 50 candidates). Quick test:
+vLLM/Ollama. Default model `jina-reranker-v2-base-multilingual`
+(~278M params; ~80-300ms to rerank 25-50 candidates). NB: TEI's ORT
+backend requires `onnx/model.onnx` in the model dir, so any swap must be to
+a reranker that ships ONNX weights on HF (verify with
+`curl -sL 'https://huggingface.co/api/models/<org>/<model>/tree/main?recursive=true' | grep onnx`).
+Notable models that **don't** ship ONNX: `BAAI/bge-reranker-v2-m3`.
+Quick test:
 ```bash
 curl -sk https://apex-spark-01.local/rerank/rerank \
   -H 'Content-Type: application/json' \
@@ -132,13 +137,13 @@ candidates per request works out of the box (TEI's
 `--max-client-batch-size` default). For the typical RAG flow
 (retrieve top-25 by embedding, rerank → take top-10) just pass all 25
 candidates in one call. Internal batching, single tokenization of the
-query, sorted response. Defaults for bge-reranker-v2-m3:
+query, sorted response. Defaults for jina-reranker-v2-base-multilingual:
 
 | Param | Default | What it gates | When to change |
 |---|---|---|---|
 | `--max-client-batch-size` | 32 | Hard cap on `texts[]` length per request | If you need >32 candidates per call — bump in the tei-reranker command |
 | `--max-batch-tokens` | 16384 | Token budget for one internal forward-pass batch | Rarely; only if many long candidates make a single request OOM |
-| Per-pair max length | 512 tokens | Model architecture limit (bge-reranker-v2-m3) | Pass `truncate: true` in the body for chunks longer than ~450 tokens, or pre-chunk smaller |
+| Per-pair max length | 1024 tokens | Model architecture limit (jina-reranker-v2-base-multilingual) | Pass `truncate: true` in the body for chunks longer than ~900 tokens, or pre-chunk smaller |
 
 Practical latencies on CPU/arm64 with default settings:
 

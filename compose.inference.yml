@@ -150,10 +150,12 @@ services:
   # ── TEI reranker — second TEI instance for the RAG /rerank endpoint ──
   # Same image as the embedder above; TEI auto-detects cross-encoder models
   # from config.json and exposes /rerank (Cohere-compatible) instead of /embed.
-  # CPU/arm64 is plenty for bge-reranker-v2-m3 sized models (~100-300ms to
-  # rerank 50 candidates) — no GPU stake required, doesn't compete with vLLM.
+  # CPU/arm64 is plenty for ~300-600M cross-encoder rerankers (~100-350ms to
+  # rerank 25-50 candidates) — no GPU stake required, doesn't compete with vLLM.
   # If you need higher throughput later, swap TEI_IMAGE to a GPU build and
   # add a deploy.devices block like the vllm service has.
+  # NB: TEI's ORT backend requires onnx/model.onnx in the model dir. Verify
+  # any new reranker has it on HF before pointing TEI_RERANKER_MODEL at it.
   tei-reranker:
     image: ${TEI_IMAGE:-local/tei:cpu-arm64}
     entrypoint: []                              # see tei service comment above

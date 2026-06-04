@@ -248,15 +248,24 @@ the Python downloader, even though `curl` works fine. Symptom: `du -sh
 /data/models/hf-cache` flat; `.incomplete` blob files at 0 bytes;
 `diagnose-hf.sh` shows API probes succeeding. Use the curl-based downloader:
 ```bash
-./hf-curl-download.sh Qwen/Qwen3-32B-AWQ      # → /data/models/local/Qwen3-32B-AWQ/
-./hf-curl-download.sh BAAI/bge-m3
-./hf-curl-download.sh BAAI/bge-reranker-v2-m3
+./hf-curl-download.sh Qwen/Qwen3-32B-AWQ                          # → /data/models/local/Qwen3-32B-AWQ/
+./hf-curl-download.sh BAAI/bge-m3                                 # embedder
+./hf-curl-download.sh jinaai/jina-reranker-v2-base-multilingual   # reranker — see note
 ```
 This bypasses `hf` entirely, writes a flat directory, and resumes interrupted
-downloads. Point vLLM at the local path instead of the HF repo ID:
+downloads. Set the bare model names in `.env` (the compose resolver expands
+them to `/data/local/<name>` inside the container):
 ```
-VLLM_MODEL=/data/models/local/Qwen3-32B-AWQ
+VLLM_MODEL=Qwen3-32B-AWQ
+TEI_MODEL=bge-m3
+TEI_RERANKER_MODEL=jina-reranker-v2-base-multilingual
 ```
+**Reranker note**: TEI's CPU/arm64 build uses ORT (ONNX Runtime), which
+requires `onnx/model.onnx` in the model directory. The default reranker
+above ships ONNX. The more obvious choice — `BAAI/bge-reranker-v2-m3` —
+ships only PyTorch safetensors and **will fail to start** in TEI without
+either (a) converting to ONNX yourself via `optimum-cli export onnx`, or
+(b) rebuilding TEI with the candle backend feature.
 
 ### A11. Install restic (for backups)
 ```bash
