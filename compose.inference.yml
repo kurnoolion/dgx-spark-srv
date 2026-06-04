@@ -11,19 +11,45 @@ services:
   # ── vLLM — 75% of inference pool (~84GB via gpu-memory-utilization 0.65) ──
   vllm:
     image: nvcr.io/nvidia/vllm:25.11-py3      # NGC Spark-tuned, GB10/sm_121 ready
-    # Shell form is used so we can conditionally append --reasoning-parser
-    # only when VLLM_REASONING_PARSER is set. exec ensures vllm still
-    # receives signals. When the parser is enabled, vLLM splits the model's
-    # <think>...</think> tokens out of choices[].message.content into
-    # choices[].message.reasoning_content, so OpenAI-compatible clients
-    # (NORA, SIRA) see only the clean answer.
-    # Note: vLLM 0.8+ (NGC 25.11+) removed the separate --enable-reasoning
-    # flag — the presence of --reasoning-parser is enough.
+    # Shell form is used for two reasons:
+    #   1. resolve VLLM_MODEL — supports three forms, see below.
+    #   2. conditionally append --reasoning-parser only when set.
+    # exec ensures vllm still receives signals (Ctrl-C, SIGTERM).
+    #
+    # VLLM_MODEL resolution rules:
+    #   "Qwen3-32B-AWQ"               → loads /data/local/Qwen3-32B-AWQ
+    #                                   (bare name shorthand — preferred)
+    #   "/data/local/Qwen3-32B-AWQ"   → loads from that path (legacy form,
+    #                                   still works)
+    #   "Qwen/Qwen3-32B-AWQ"          → HF repo ID (looked up in HF cache
+    #                                   under /data/hf-cache)
+    #
+    # --served-model-name is always set to a clean short name (basename for
+    # paths, full ID for HF repos) so OpenAI-compatible clients can request
+    # `"model": "Qwen3-32B-AWQ"` regardless of how vLLM was configured to
+    # find the weights.
+    #
+    # When the reasoning parser is enabled, vLLM splits <think>...</think>
+    # tokens out of message.content into message.reasoning_content.
+    # vLLM 0.8+ (NGC 25.11+) dropped --enable-reasoning — passing
+    # --reasoning-parser alone is sufficient.
+    # NB: $$ escapes a literal $ past Compose's variable interpolation. Shell
+    # variables we define here (M, LOAD, SERVED) must use $$ so Compose passes
+    # them through unchanged; ${VLLM_*} should stay single-$ to be expanded by
+    # Compose from .env at container-start time.
     command:
       - sh
       - -c
       - >
-        exec vllm serve "${VLLM_MODEL}"
+        M="${VLLM_MODEL}";
+        case "$$M" in
+          /*)   LOAD="$$M";             SERVED="$${M##*/}" ;;
+          */*)  LOAD="$$M";             SERVED="$$M" ;;
+          *)    LOAD="/data/local/$$M"; SERVED="$$M" ;;
+        esac;
+        echo "vLLM loading: $$LOAD   (API model name: $$SERVED)";
+        exec vllm serve "$$LOAD"
+        --served-model-name "$$SERVED"
         --gpu-memory-utilization "${VLLM_GPU_UTIL}"
         --max-model-len "${VLLM_MAX_LEN}"
         --host 0.0.0.0 --port 8000

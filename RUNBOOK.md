@@ -71,12 +71,20 @@ make models             # pull the default set
 While vLLM is up, keep Ollama models ≤ ~26 GB (≤32B-Q4 / ≤27B-Q8). For a one-off
 larger model, `make vllm-stop` first, then `make vllm-start` when done.
 
-**vLLM** serves the single model in `VLLM_MODEL`. To switch it:
+**vLLM** serves the single model in `VLLM_MODEL`. The compose file auto-
+resolves three forms — `Qwen3-32B-AWQ` (bare name; expands to
+`/data/local/Qwen3-32B-AWQ`), `/data/local/Qwen3-32B-AWQ` (absolute path),
+or `Qwen/Qwen3-32B-AWQ` (HF repo ID). To switch:
 ```bash
-# edit VLLM_MODEL in .env, then:
+# edit VLLM_MODEL in .env (bare-name form preferred), then:
 make restart svc=vllm   # ~minutes to load; Ollama unaffected
 ```
-Check what's served: `docker compose -f compose.inference.yml exec vllm curl -s localhost:8000/v1/models`.
+Check what's served and the **short name API clients must use**:
+```bash
+docker compose -f compose.inference.yml exec vllm curl -s localhost:8000/v1/models \
+  | python3 -m json.tool
+# The "id" field is the name to pass as `"model": "..."` in API requests.
+```
 
 For **thinking-style models** (Qwen3, DeepSeek-R1), set `VLLM_REASONING_PARSER`
 in `.env` (`qwen3` or `deepseek_r1`) so vLLM separates `<think>...</think>`
@@ -87,10 +95,14 @@ Leave blank when serving a non-reasoning model — some refuse the flag.
 parser; vLLM 0.8+/NGC 25.11+ dropped that flag. The compose file uses the
 0.8+ syntax. If you ever roll back to an older image, add `--enable-reasoning`
 back to the conditional in `compose.inference.yml`.)
-Verify after a model swap:
+Verify after a model swap (the model name is whatever `/v1/models` reports —
+basename for path/bare-name forms, full HF repo ID for HF lookups):
 ```bash
-curl -s http://localhost:8000/v1/chat/completions -H 'Content-Type: application/json' \
-  -d '{"model":"'"$VLLM_MODEL"'","messages":[{"role":"user","content":"why is the sky blue?"}],"max_tokens":128}' \
+MNAME=$(docker compose -f compose.inference.yml exec -T vllm \
+        curl -s localhost:8000/v1/models | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"][0]["id"])')
+docker compose -f compose.inference.yml exec -T vllm \
+  curl -s http://localhost:8000/v1/chat/completions -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$MNAME\",\"messages\":[{\"role\":\"user\",\"content\":\"why is the sky blue?\"}],\"max_tokens\":128}" \
   | python3 -m json.tool
 # message.content should be the answer only; thinking lives in reasoning_content
 ```

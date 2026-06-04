@@ -94,20 +94,30 @@ proxy — that's the script that told us curl works where the HF CLI didn't.
 vLLM loads ONE model at boot, named by `VLLM_MODEL` in `.env`. After
 downloading, point vLLM at the model and restart that one service.
 
-**Two valid forms** for `VLLM_MODEL`:
+**Three valid forms** for `VLLM_MODEL` (auto-detected by a resolver in
+`compose.inference.yml`):
 
-| Form | Example | Use when |
-|---|---|---|
-| Local path | `/data/local/Qwen3-32B-AWQ` | Downloaded via `hf-curl-download.sh` (flat layout) |
-| HF repo ID | `Qwen/Qwen3-32B-AWQ` | Downloaded via standard HF CLI (cache layout under `/data/hf-cache`) |
+| Form | Example | Resolves to | Use when |
+|---|---|---|---|
+| **Bare name** *(preferred)* | `Qwen3-32B-AWQ` | `/data/local/Qwen3-32B-AWQ` | Downloaded via `hf-curl-download.sh` — the typical case |
+| Absolute path | `/data/local/Qwen3-32B-AWQ` | (used as-is) | Model lives outside `/data/local/` or legacy `.env` files |
+| HF repo ID | `Qwen/Qwen3-32B-AWQ` | HF cache lookup under `/data/hf-cache` | Downloaded via standard HF CLI (cache layout) |
 
-The bundle defaults to the local-path form because that's what
-`hf-curl-download.sh` produces. Both are auto-detected by vLLM.
+The resolver also sets vLLM's `--served-model-name` to a clean short name
+(basename for paths, full repo ID for HF lookups), so OpenAI-compatible API
+clients use the short form regardless of which `.env` value you picked:
+
+```bash
+# Same short model name works for all three VLLM_MODEL forms above
+curl http://apex-spark-01.local/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "Qwen3-32B-AWQ", "messages": [...]}'
+```
 
 **Switching models**:
 ```bash
-./hf-curl-download.sh Qwen/Qwen3-14B-AWQ            # 1. download
-sudo $EDITOR /data/srv/.env                          # 2. set VLLM_MODEL=/data/local/Qwen3-14B-AWQ
+./hf-curl-download.sh Qwen/Qwen3-14B-AWQ             # 1. download
+sudo $EDITOR /data/srv/.env                          # 2. set VLLM_MODEL=Qwen3-14B-AWQ
 make restart svc=vllm                                # 3. restart vLLM only (~2-5 min reload)
 ```
 Ollama is unaffected by this — it keeps whatever model it had loaded.
