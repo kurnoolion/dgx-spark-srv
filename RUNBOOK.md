@@ -78,6 +78,19 @@ make restart svc=vllm   # ~minutes to load; Ollama unaffected
 ```
 Check what's served: `docker compose -f compose.inference.yml exec vllm curl -s localhost:8000/v1/models`.
 
+For **thinking-style models** (Qwen3, DeepSeek-R1), set `VLLM_REASONING_PARSER`
+in `.env` (`qwen3` or `deepseek_r1`) so vLLM separates `<think>...</think>`
+content into `message.reasoning_content`. Without this, the thinking trace
+leaks into `message.content` and shows up in NORA/SIRA/Open-WebUI responses.
+Leave blank when serving a non-reasoning model — some refuse the flag.
+Verify after a model swap:
+```bash
+curl -s http://localhost:8000/v1/chat/completions -H 'Content-Type: application/json' \
+  -d '{"model":"'"$VLLM_MODEL"'","messages":[{"role":"user","content":"why is the sky blue?"}],"max_tokens":128}' \
+  | python3 -m json.tool
+# message.content should be the answer only; thinking lives in reasoning_content
+```
+
 ## Observability (memory monitoring)
 
 Grafana at `https://$SITE_HOST/grafana` (admin / `GRAFANA_PASSWORD`) → **APEX —

@@ -71,7 +71,7 @@ make vllm-start    # reclaims the configured VLLM_GPU_UTIL slice
 ## Routes (via Caddy, https://$SITE_HOST)
 | Path | Backend | Use |
 |---|---|---|
-| `/v1/*` | vLLM :8000 | OpenAI-compatible chat/completions. **Also served on plain HTTP** (`http://$SITE_HOST/v1/*`) so cert-averse clients (SIRA, generic scripts) can skip TLS. Other paths on HTTP redirect to HTTPS. |
+| `/v1/*` | vLLM :8000 | OpenAI-compatible chat/completions. **Also served on plain HTTP** (`http://$SITE_HOST/v1/*`) so cert-averse clients (SIRA, generic scripts) can skip TLS. Other paths on HTTP redirect to HTTPS. For Qwen3 / DeepSeek-R1, the reasoning parser is enabled via `VLLM_REASONING_PARSER` in `.env` — `<think>` blocks are routed into `choices[].message.reasoning_content` so `message.content` carries only the clean answer. |
 | `/ollama/*` | Ollama :11434 | Ollama API |
 | `/embed/*` | TEI :80 | embeddings for RAG |
 | `/` (root + anything unmatched) | open-webui :8080 | browser chat UI for vLLM (first signup → admin). `/chat` redirects to `/` for backward-compat. |
