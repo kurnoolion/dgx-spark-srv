@@ -11,12 +11,14 @@ services:
   # ── vLLM — 75% of inference pool (~84GB via gpu-memory-utilization 0.65) ──
   vllm:
     image: nvcr.io/nvidia/vllm:25.11-py3      # NGC Spark-tuned, GB10/sm_121 ready
-    # Shell form is used so we can conditionally append the reasoning-parser
-    # flags only when VLLM_REASONING_PARSER is set (some non-reasoning models
-    # reject --enable-reasoning). exec ensures vllm still receives signals.
-    # When the parser is enabled, vLLM splits <think>...</think> content out
-    # of choices[].message.content into choices[].message.reasoning_content,
-    # so OpenAI-compatible clients (NORA, SIRA) see only the clean answer.
+    # Shell form is used so we can conditionally append --reasoning-parser
+    # only when VLLM_REASONING_PARSER is set. exec ensures vllm still
+    # receives signals. When the parser is enabled, vLLM splits the model's
+    # <think>...</think> tokens out of choices[].message.content into
+    # choices[].message.reasoning_content, so OpenAI-compatible clients
+    # (NORA, SIRA) see only the clean answer.
+    # Note: vLLM 0.8+ (NGC 25.11+) removed the separate --enable-reasoning
+    # flag — the presence of --reasoning-parser is enough.
     command:
       - sh
       - -c
@@ -25,7 +27,7 @@ services:
         --gpu-memory-utilization "${VLLM_GPU_UTIL}"
         --max-model-len "${VLLM_MAX_LEN}"
         --host 0.0.0.0 --port 8000
-        ${VLLM_REASONING_PARSER:+--enable-reasoning --reasoning-parser "${VLLM_REASONING_PARSER}"}
+        ${VLLM_REASONING_PARSER:+--reasoning-parser "${VLLM_REASONING_PARSER}"}
     environment:
       HF_TOKEN: ${HF_TOKEN}
       HF_HUB_ENABLE_HF_TRANSFER: "1"

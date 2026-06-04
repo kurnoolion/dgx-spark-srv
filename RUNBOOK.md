@@ -83,6 +83,10 @@ in `.env` (`qwen3` or `deepseek_r1`) so vLLM separates `<think>...</think>`
 content into `message.reasoning_content`. Without this, the thinking trace
 leaks into `message.content` and shows up in NORA/SIRA/Open-WebUI responses.
 Leave blank when serving a non-reasoning model — some refuse the flag.
+(Older vLLM builds (≤0.7) required `--enable-reasoning` alongside the
+parser; vLLM 0.8+/NGC 25.11+ dropped that flag. The compose file uses the
+0.8+ syntax. If you ever roll back to an older image, add `--enable-reasoning`
+back to the conditional in `compose.inference.yml`.)
 Verify after a model swap:
 ```bash
 curl -s http://localhost:8000/v1/chat/completions -H 'Content-Type: application/json' \
