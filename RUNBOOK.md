@@ -113,7 +113,7 @@ cross-encoder model. CPU-only — no GPU stake, doesn't compete with
 vLLM/Ollama. Default model `bge-reranker-v2-m3` (~568M params; ~100-300ms
 to rerank 50 candidates). Quick test:
 ```bash
-curl -s http://apex-spark-01.local/rerank/rerank \
+curl -sk https://apex-spark-01.local/rerank/rerank \
   -H 'Content-Type: application/json' \
   -d '{
     "query": "What is LTE?",
@@ -125,7 +125,36 @@ curl -s http://apex-spark-01.local/rerank/rerank \
   }' | python3 -m json.tool
 # Returns scored, sorted indices into texts[]; LTE-related entries score highest.
 ```
-To swap the reranker model: download it (`./hf-curl-download.sh <user/repo>`),
+
+**Batching candidates in one call.** A single `/rerank` request takes one
+`query` + an array of candidate `texts` — that IS the batch. Up to ~32
+candidates per request works out of the box (TEI's
+`--max-client-batch-size` default). For the typical RAG flow
+(retrieve top-25 by embedding, rerank → take top-10) just pass all 25
+candidates in one call. Internal batching, single tokenization of the
+query, sorted response. Defaults for bge-reranker-v2-m3:
+
+| Param | Default | What it gates | When to change |
+|---|---|---|---|
+| `--max-client-batch-size` | 32 | Hard cap on `texts[]` length per request | If you need >32 candidates per call — bump in the tei-reranker command |
+| `--max-batch-tokens` | 16384 | Token budget for one internal forward-pass batch | Rarely; only if many long candidates make a single request OOM |
+| Per-pair max length | 512 tokens | Model architecture limit (bge-reranker-v2-m3) | Pass `truncate: true` in the body for chunks longer than ~450 tokens, or pre-chunk smaller |
+
+Practical latencies on CPU/arm64 with default settings:
+
+| Candidates per call | Latency (typical) |
+|---|---|
+| 10 | 60-150 ms |
+| 25 | 150-350 ms |
+| 50 | 300-700 ms |
+| 100+ | 700 ms+ — split into parallel calls instead |
+
+**Multi-query rerank.** `/rerank` is one query, N texts. For M queries
+each with their own candidates, fire M separate requests in parallel
+(`asyncio.gather`) — TEI's `--max-batch-requests` is unlimited so
+concurrent calls share GPU/CPU time cleanly.
+
+**Swap the reranker model**: download it (`./hf-curl-download.sh <user/repo>`),
 set `TEI_RERANKER_MODEL=<bare-name>` in `.env`, then `make restart svc=tei-reranker`
 (~30s reload).
 
