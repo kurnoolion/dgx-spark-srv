@@ -49,8 +49,9 @@ elif [[ "${1:-}" == "-f" && -n "${2:-}" ]]; then
 elif (( $# > 0 )); then
   models=("$@")
 else
-  [[ -n "${VLLM_MODEL:-}" ]] && models+=("$VLLM_MODEL")
-  [[ -n "${TEI_MODEL:-}" ]]  && models+=("$TEI_MODEL")
+  [[ -n "${VLLM_MODEL:-}" ]]         && models+=("$VLLM_MODEL")
+  [[ -n "${TEI_MODEL:-}" ]]          && models+=("$TEI_MODEL")
+  [[ -n "${TEI_RERANKER_MODEL:-}" ]] && models+=("$TEI_RERANKER_MODEL")
 fi
 
 # ─────────────────────── logging ───────────────────────
@@ -62,7 +63,7 @@ current="<none>"
 trap 'log "INTERRUPTED at: $current"; exit 130' INT TERM
 
 # ─────────────────────── preflight ───────────────────────
-(( ${#models[@]} > 0 )) || { log "ERROR no models to download (set VLLM_MODEL/TEI_MODEL in .env, pass as args, or use -f file)"; exit 1; }
+(( ${#models[@]} > 0 )) || { log "ERROR no models to download (set VLLM_MODEL/TEI_MODEL/TEI_RERANKER_MODEL in .env, pass as args, or use -f file)"; exit 1; }
 
 # Detect which HF CLI is available: new `hf` (huggingface_hub ≥ 0.24) preferred,
 # old `huggingface-cli` as fallback. The new CLI uses `hf auth whoami` /
@@ -97,6 +98,18 @@ failed=()
 for m in "${models[@]}"; do
   current="$m"
   log "──── $m ────"
+  # Bare-name shorthand (e.g. "Qwen3-32B-AWQ" from .env) is for the LOAD path
+  # only — the service resolver expands it to /data/local/<name>. The
+  # downloader needs the full HF repo ID ("user/repo"), which we can't
+  # derive automatically. Skip with a clear pointer instead of failing
+  # opaquely against HF.
+  if [[ "$m" != */* && "$m" != /* ]]; then
+    log "SKIP $m: bare name has no HF repo ID. Download once with:"
+    log "    ./hf-curl-download.sh <HF-org>/$m    # e.g. BAAI/$m or Qwen/$m"
+    log "Then the bare name in .env works for the running service."
+    failed+=("$m (bare-name; needs explicit HF repo ID)")
+    continue
+  fi
   attempt=1
   ok=0
   while (( attempt <= MAX_RETRIES )); do

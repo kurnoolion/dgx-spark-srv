@@ -117,14 +117,62 @@ services:
   #   3. adjust VLLM_GPU_UTIL down ~0.03 to make room for TEI's ~4 GB
   tei:
     image: ${TEI_IMAGE:-local/tei:cpu-arm64}
-    command: ["--model-id", "${TEI_MODEL}"]
+    # The TEI image bakes in ENTRYPOINT ["text-embeddings-router"], which would
+    # consume our `sh -c` as positional args. Clear the entrypoint so `command`
+    # is the full command line, then exec back into the binary ourselves.
+    entrypoint: []
+    # Same VLLM_MODEL-style resolver as the vllm service: bare names expand to
+    # /data/local/<name>, absolute paths and HF repo IDs pass through.
+    command:
+      - sh
+      - -c
+      - >
+        M="${TEI_MODEL}";
+        case "$$M" in
+          /*)   LOAD="$$M" ;;
+          */*)  LOAD="$$M" ;;
+          *)    LOAD="/data/local/$$M" ;;
+        esac;
+        echo "TEI embedder loading: $$LOAD";
+        exec text-embeddings-router --model-id "$$LOAD"
     environment:
       HF_TOKEN: ${HF_TOKEN}
       HF_HOME: /data/hf-cache       # points HF lib at the bind-mounted cache below
     volumes:
-      # Same as vllm — see explanation above. TEI_MODEL can be either:
-      #   BAAI/bge-m3                   (HF cache layout under /data/hf-cache)
-      #   /data/local/bge-m3            (flat dir from hf-curl-download.sh)
+      # Same as vllm — see explanation above. TEI_MODEL accepts three forms:
+      #   bge-m3                        (bare name — preferred; expands to /data/local/bge-m3)
+      #   /data/local/bge-m3            (absolute path; legacy)
+      #   BAAI/bge-m3                   (HF repo ID — HF cache layout under /data/hf-cache)
+      - /data/models:/data
+    networks: [apex]
+    restart: unless-stopped
+
+  # ── TEI reranker — second TEI instance for the RAG /rerank endpoint ──
+  # Same image as the embedder above; TEI auto-detects cross-encoder models
+  # from config.json and exposes /rerank (Cohere-compatible) instead of /embed.
+  # CPU/arm64 is plenty for bge-reranker-v2-m3 sized models (~100-300ms to
+  # rerank 50 candidates) — no GPU stake required, doesn't compete with vLLM.
+  # If you need higher throughput later, swap TEI_IMAGE to a GPU build and
+  # add a deploy.devices block like the vllm service has.
+  tei-reranker:
+    image: ${TEI_IMAGE:-local/tei:cpu-arm64}
+    entrypoint: []                              # see tei service comment above
+    command:
+      - sh
+      - -c
+      - >
+        M="${TEI_RERANKER_MODEL}";
+        case "$$M" in
+          /*)   LOAD="$$M" ;;
+          */*)  LOAD="$$M" ;;
+          *)    LOAD="/data/local/$$M" ;;
+        esac;
+        echo "TEI reranker loading: $$LOAD";
+        exec text-embeddings-router --model-id "$$LOAD"
+    environment:
+      HF_TOKEN: ${HF_TOKEN}
+      HF_HOME: /data/hf-cache
+    volumes:
       - /data/models:/data
     networks: [apex]
     restart: unless-stopped

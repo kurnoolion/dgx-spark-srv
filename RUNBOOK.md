@@ -107,6 +107,28 @@ docker compose -f compose.inference.yml exec -T vllm \
 # message.content should be the answer only; thinking lives in reasoning_content
 ```
 
+**TEI reranker** (`tei-reranker` service, route `/rerank/*`) runs in its own
+container using the same TEI image as the embedder but pointed at a
+cross-encoder model. CPU-only — no GPU stake, doesn't compete with
+vLLM/Ollama. Default model `bge-reranker-v2-m3` (~568M params; ~100-300ms
+to rerank 50 candidates). Quick test:
+```bash
+curl -s http://apex-spark-01.local/rerank/rerank \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "query": "What is LTE?",
+    "texts": [
+      "LTE is a 4G cellular standard from 3GPP.",
+      "Espresso is a concentrated coffee brewing method.",
+      "5G NR succeeded LTE as the dominant mobile standard."
+    ]
+  }' | python3 -m json.tool
+# Returns scored, sorted indices into texts[]; LTE-related entries score highest.
+```
+To swap the reranker model: download it (`./hf-curl-download.sh <user/repo>`),
+set `TEI_RERANKER_MODEL=<bare-name>` in `.env`, then `make restart svc=tei-reranker`
+(~30s reload).
+
 ## Observability (memory monitoring)
 
 Full plain-language guide in **[OBSERVABILITY.md](OBSERVABILITY.md)**.
