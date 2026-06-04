@@ -17,6 +17,111 @@ Service data is bind-mounted onto `/data/srv/data/*` (durable, backed up) and
 models onto `/data/models/*` (disposable) — **not** Docker named volumes. Disk
 layout in [STORAGE.md](STORAGE.md); day-to-day ops in [RUNBOOK.md](RUNBOOK.md).
 
+## Downloading images and models
+
+In normal networks `docker pull` and `huggingface-hub` Just Work, and you can
+skip this section. Behind aggressive corp proxies — HTTP/2 stream resets,
+multi-connection downloads stalling mid-transfer, manifest fetches returning
+EOF — the bundle ships proxy-tolerant fallbacks for both. All three operations
+below are `make` one-liners; the scripts behind them handle retries, resume,
+and verification automatically.
+
+### Docker images — `make pull-stack`
+
+`docker pull` opens many parallel streams; corp proxies often choke on those.
+`skopeo` uses single-connection HTTPS (the kind proxies tolerate) and writes
+each image to a local tarball, which `docker load` then registers. Same end
+state as `docker pull`, just a different transport.
+
+```bash
+# Pull every image referenced in compose*.yml. Idempotent: images already
+# present locally are skipped. Retries each pull up to 3× with backoff.
+make pull-stack
+
+# Just one image:
+make pull-stack images="nvcr.io/nvidia/vllm:25.11-py3"
+```
+
+**Auth**:
+- `nvcr.io/*` (vLLM, dcgm-exporter): `export NGC_API_KEY=...` in your shell
+  first. Get the key at https://ngc.nvidia.com/setup/api-key.
+- `gcr.io`, `ghcr.io`, Docker Hub: public images — no auth needed.
+
+**Diagnostics**: pulls log to `~/skopeo-pull-stack.log`. Tarballs land in
+`/tmp/` and are deleted after `docker load` (set `KEEP_TARS=1` to keep them
+for sneakernet copies). For registries that even skopeo can't reach, build
+or pull off-box and `docker save` → sneakernet → `docker load` on the
+spark — see SETUP.md B2-build for the TEI example.
+
+### HuggingFace models — `make download-models` and `hf-curl-download.sh`
+
+The `hf` / `huggingface-hub` Python clients open many concurrent streams per
+file and resume sloppily; corp proxies often establish the connections but
+deliver zero bytes. `hf-curl-download.sh` uses one curl per file (resumable),
+and — critically — **verifies each downloaded file's size against the HF API
+after the transfer**, catching silent mid-stream truncations that leave curl
+exiting 0 with a short file (the symptom that previously caused vLLM to fail
+with `SafetensorError: incomplete metadata`).
+
+**Bulk pre-download** (uses `VLLM_MODEL` + `TEI_MODEL` from `.env`):
+
+```bash
+make download-models
+make download-models models="Qwen/Qwen3-32B-AWQ BAAI/bge-m3"
+./download-models.sh -f models-list.txt           # one ID per line; # = comment
+```
+
+**One model at a time**:
+
+```bash
+./hf-curl-download.sh Qwen/Qwen3-32B-AWQ
+./hf-curl-download.sh BAAI/bge-m3 /data/models/local/bge-m3
+```
+
+Default destination: `/data/models/local/<repo-basename>` — a flat directory
+that vLLM/TEI can read directly. Re-running is safe — already-complete files
+are size-verified and skipped.
+
+**Auth**: uses `$HF_TOKEN` from your shell or `.env`, falls back to
+`~/.cache/huggingface/token`. Gated models need a token with access.
+
+**Logs**: `~/hf-download.log` (bulk) or stdout (single). If a model gets
+stuck, run `./diagnose-hf.sh` to test which transport works through your
+proxy — that's the script that told us curl works where the HF CLI didn't.
+
+### vLLM model setup
+
+vLLM loads ONE model at boot, named by `VLLM_MODEL` in `.env`. After
+downloading, point vLLM at the model and restart that one service.
+
+**Two valid forms** for `VLLM_MODEL`:
+
+| Form | Example | Use when |
+|---|---|---|
+| Local path | `/data/local/Qwen3-32B-AWQ` | Downloaded via `hf-curl-download.sh` (flat layout) |
+| HF repo ID | `Qwen/Qwen3-32B-AWQ` | Downloaded via standard HF CLI (cache layout under `/data/hf-cache`) |
+
+The bundle defaults to the local-path form because that's what
+`hf-curl-download.sh` produces. Both are auto-detected by vLLM.
+
+**Switching models**:
+```bash
+./hf-curl-download.sh Qwen/Qwen3-14B-AWQ            # 1. download
+sudo $EDITOR /data/srv/.env                          # 2. set VLLM_MODEL=/data/local/Qwen3-14B-AWQ
+make restart svc=vllm                                # 3. restart vLLM only (~2-5 min reload)
+```
+Ollama is unaffected by this — it keeps whatever model it had loaded.
+
+**Reasoning models** (Qwen3-*, DeepSeek-R1): also set
+`VLLM_REASONING_PARSER=qwen3` (or `deepseek_r1`) so the `<think>` trace gets
+routed into `message.reasoning_content` rather than appearing in
+`message.content`. See RUNBOOK.md "Model management".
+
+**Verifying what vLLM is serving** (after restart finishes):
+```bash
+docker compose -f compose.inference.yml exec vllm curl -s localhost:8000/v1/models
+```
+
 ## GPU memory budget (128 GB unified)
 
 | Consumer | Target | Enforced by |
@@ -121,15 +226,12 @@ If you later need auth, three lightweight options:
   history of `compose.gateway.yml` + `Caddyfile`).
 
 ## Observability
-Prometheus + Grafana + exporters (cAdvisor, node-exporter, dcgm-exporter) come up
-with `make up`. Grafana is at `https://$SITE_HOST/grafana` (login `admin` /
-`GRAFANA_PASSWORD`), with a provisioned **Service Memory** dashboard: per-container
-memory, memory vs. limit, the 128 GB unified pool (= GPU memory on GB10), GPU
-compute/memory-bandwidth utilization, temperature, and power. Set
-`GRAFANA_PASSWORD` in `.env`. Own footprint ~1.5 GB; TSDB capped at 15-day
-retention. This is how you'll measure the real per-service RAM before finalizing
-the memory split. Note: GB10's unified memory means there is **no separate GPU
-framebuffer metric** — host memory % IS GPU memory %.
+Prometheus + Grafana + exporters come up with `make up`. Grafana is at
+`https://$SITE_HOST/grafana` (login `admin` / `GRAFANA_PASSWORD`). For the
+plain-language walkthrough — how Prometheus/Grafana/exporters fit together,
+panel-by-panel guide to the **Service Memory** dashboard, useful PromQL
+queries, and the `make watch-vllm` / `make watch-vllm-load` command-line
+monitors — see **[OBSERVABILITY.md](OBSERVABILITY.md)**.
 
 ## Adding a service
 1. Confirm arm64: `docker manifest inspect <image> | grep arm64`
@@ -161,4 +263,4 @@ symptom→fix troubleshooting table.
 - `load-tei-on-spark.sh` — load the TEI image tarball built off-box (see SETUP.md B2-build)
 - `diagnose-hf.sh` — HF download stall diagnostics
 - `SETUP.md` — first-time deployment procedure
-- `STORAGE.md` / `RUNBOOK.md` — disk layout / operations
+- `STORAGE.md` / `RUNBOOK.md` / `OBSERVABILITY.md` — disk layout / day-to-day operations / dashboards + live monitoring

@@ -97,6 +97,9 @@ curl -s http://localhost:8000/v1/chat/completions -H 'Content-Type: application/
 
 ## Observability (memory monitoring)
 
+Full plain-language guide in **[OBSERVABILITY.md](OBSERVABILITY.md)**.
+Cheat sheet for the operational view:
+
 Grafana at `https://$SITE_HOST/grafana` (admin / `GRAFANA_PASSWORD`) → **APEX —
 Service Memory** dashboard: per-container memory, % of limit, host memory, GPU
 framebuffer. Use it to capture real per-service RAM before finalizing the split.
