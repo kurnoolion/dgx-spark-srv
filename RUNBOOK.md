@@ -110,12 +110,26 @@ docker compose -f compose.inference.yml exec -T vllm \
 **TEI reranker** (`tei-reranker` service, route `/rerank/*`) runs in its own
 container using the same TEI image as the embedder but pointed at a
 cross-encoder model. CPU-only — no GPU stake, doesn't compete with
-vLLM/Ollama. Default model `jina-reranker-v2-base-multilingual`
-(~278M params; ~80-300ms to rerank 25-50 candidates). NB: TEI's ORT
-backend requires `onnx/model.onnx` in the model dir, so any swap must be to
-a reranker that ships ONNX weights on HF (verify with
-`curl -sL 'https://huggingface.co/api/models/<org>/<model>/tree/main?recursive=true' | grep onnx`).
-Notable models that **don't** ship ONNX: `BAAI/bge-reranker-v2-m3`.
+vLLM/Ollama. Default model `bge-reranker-large`
+(~568M params; ~100-400ms to rerank 25 candidates on CPU/arm64). Picking a
+new reranker means clearing **two** hurdles:
+
+  - **ONNX export on HF** — TEI's ORT backend loads `onnx/model.onnx`.
+    `curl -sL 'https://huggingface.co/api/models/<org>/<model>/tree/main?recursive=true' | grep onnx`
+  - **`model_type` field in config.json** — TEI's parser is strict and does
+    NOT follow `auto_map` (`trust_remote_code=True`-style configs are rejected).
+    `curl -sL 'https://huggingface.co/<org>/<model>/raw/main/config.json' | python3 -c 'import sys,json; c=json.load(sys.stdin); print("model_type:", c.get("model_type","MISSING"))'`
+
+Models we tested and rejected (kept here so we don't relitigate):
+  - `BAAI/bge-reranker-v2-m3` — fails hurdle 1 (PyTorch safetensors only).
+  - `jinaai/jina-reranker-v2-base-multilingual` — fails hurdle 2 (uses
+    `auto_map` + custom `XLMRobertaFlashConfig`, no bare `model_type`).
+
+Verified drop-in alternatives that clear both:
+  - `BAAI/bge-reranker-large` *(default)* — ~568M, xlm-roberta, multilingual.
+  - `BAAI/bge-reranker-base` — ~278M, xlm-roberta, smaller/faster.
+  - `mixedbread-ai/mxbai-rerank-large-v1` — ~435M, deberta-v2, strong English.
+  - `mixedbread-ai/mxbai-rerank-base-v1` — ~184M, deberta-v2.
 Quick test:
 ```bash
 curl -sk https://apex-spark-01.local/rerank/rerank \
@@ -132,27 +146,33 @@ curl -sk https://apex-spark-01.local/rerank/rerank \
 ```
 
 **Batching candidates in one call.** A single `/rerank` request takes one
-`query` + an array of candidate `texts` — that IS the batch. Up to ~32
+`query` + an array of candidate `texts` — that IS the batch. Up to 32
 candidates per request works out of the box (TEI's
 `--max-client-batch-size` default). For the typical RAG flow
 (retrieve top-25 by embedding, rerank → take top-10) just pass all 25
 candidates in one call. Internal batching, single tokenization of the
-query, sorted response. Defaults for jina-reranker-v2-base-multilingual:
+query, sorted response. Defaults for bge-reranker-large:
 
 | Param | Default | What it gates | When to change |
 |---|---|---|---|
 | `--max-client-batch-size` | 32 | Hard cap on `texts[]` length per request | If you need >32 candidates per call — bump in the tei-reranker command |
 | `--max-batch-tokens` | 16384 | Token budget for one internal forward-pass batch | Rarely; only if many long candidates make a single request OOM |
-| Per-pair max length | 1024 tokens | Model architecture limit (jina-reranker-v2-base-multilingual) | Pass `truncate: true` in the body for chunks longer than ~900 tokens, or pre-chunk smaller |
+| Per-pair max length | 512 tokens | Model architecture limit (bge-reranker-large = XLM-RoBERTa base) | Pass `truncate: true` in the body for chunks longer than ~450 tokens, or pre-chunk smaller |
+| **Internal forward-pass batch** | **8** | ORT backend cap on CPU/arm64 — TEI logs `Forcing max_batch_requests=8` at startup | Not tunable — architectural limit of the ORT backend |
 
-Practical latencies on CPU/arm64 with default settings:
+Practical latencies on CPU/arm64 with default settings (bge-reranker-large):
 
-| Candidates per call | Latency (typical) |
-|---|---|
-| 10 | 60-150 ms |
-| 25 | 150-350 ms |
-| 50 | 300-700 ms |
-| 100+ | 700 ms+ — split into parallel calls instead |
+| Candidates per call | Internal sub-batches | Latency (typical) |
+|---|---|---|
+| 8 | 1 | 80-200 ms |
+| 25 | 4 (8+8+8+1) | 300-700 ms |
+| 32 | 4 (8+8+8+8) | 400-900 ms |
+| 50+ | many — split into parallel calls instead | — |
+
+The ORT backend processes at most 8 pairs per forward pass, so a 25-pair
+request takes ~3-4× the time of an 8-pair request — not 1×. For higher
+throughput, fire multiple smaller-batch requests in parallel rather than
+one giant batch.
 
 **Multi-query rerank.** `/rerank` is one query, N texts. For M queries
 each with their own candidates, fire M separate requests in parallel

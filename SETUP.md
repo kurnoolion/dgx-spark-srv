@@ -248,9 +248,9 @@ the Python downloader, even though `curl` works fine. Symptom: `du -sh
 /data/models/hf-cache` flat; `.incomplete` blob files at 0 bytes;
 `diagnose-hf.sh` shows API probes succeeding. Use the curl-based downloader:
 ```bash
-./hf-curl-download.sh Qwen/Qwen3-32B-AWQ                          # → /data/models/local/Qwen3-32B-AWQ/
-./hf-curl-download.sh BAAI/bge-m3                                 # embedder
-./hf-curl-download.sh jinaai/jina-reranker-v2-base-multilingual   # reranker — see note
+./hf-curl-download.sh Qwen/Qwen3-32B-AWQ           # → /data/models/local/Qwen3-32B-AWQ/
+./hf-curl-download.sh BAAI/bge-m3                  # embedder
+./hf-curl-download.sh BAAI/bge-reranker-large      # reranker — see note
 ```
 This bypasses `hf` entirely, writes a flat directory, and resumes interrupted
 downloads. Set the bare model names in `.env` (the compose resolver expands
@@ -258,14 +258,19 @@ them to `/data/local/<name>` inside the container):
 ```
 VLLM_MODEL=Qwen3-32B-AWQ
 TEI_MODEL=bge-m3
-TEI_RERANKER_MODEL=jina-reranker-v2-base-multilingual
+TEI_RERANKER_MODEL=bge-reranker-large
 ```
-**Reranker note**: TEI's CPU/arm64 build uses ORT (ONNX Runtime), which
-requires `onnx/model.onnx` in the model directory. The default reranker
-above ships ONNX. The more obvious choice — `BAAI/bge-reranker-v2-m3` —
-ships only PyTorch safetensors and **will fail to start** in TEI without
-either (a) converting to ONNX yourself via `optimum-cli export onnx`, or
-(b) rebuilding TEI with the candle backend feature.
+**Reranker note**: TEI's CPU/arm64 build is strict about reranker models —
+they need **(a) an ONNX export on HF** (`onnx/model.onnx`; required by the
+ORT backend) AND **(b) a `model_type` field in `config.json`** (TEI's
+parser doesn't follow `auto_map`). Two near-misses we hit:
+- `BAAI/bge-reranker-v2-m3` ships only PyTorch safetensors — no ONNX
+  export, fails (a) with "File at '.../onnx/model.onnx' does not exist".
+- `jinaai/jina-reranker-v2-base-multilingual` ships ONNX but uses
+  `auto_map` + custom `XLMRobertaFlashConfig`, fails (b) with "missing
+  field 'model_type'".
+`bge-reranker-large` clears both; `.env.example` lists other verified
+drop-ins (`bge-reranker-base`, `mixedbread-ai/mxbai-rerank-{base,large}-v1`).
 
 ### A11. Install restic (for backups)
 ```bash
