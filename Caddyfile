@@ -6,15 +6,19 @@
 # If you ever need auth back, see git history for the oauth2-proxy version, or
 # add `basicauth` blocks per route, or restore forward_auth to an auth proxy.
 
-# ── Plain-HTTP exception for vLLM ────────────────────────────────────────────
-# vLLM's /v1/* is also served on plain HTTP (port 80) so OpenAI-compatible
-# clients can avoid the self-signed-cert dance (e.g. SIRA on the HP box can
-# drop verify=False and use http://apex-spark-01.local/v1 directly).
-# All other paths on HTTP redirect to HTTPS — the relaxation is scoped to
-# vLLM only. Remove this block to go back to HTTPS-everywhere.
+# ── Plain-HTTP exceptions for vLLM + reranker ────────────────────────────────
+# Both /v1/* (vLLM) and /rerank/* (tei-reranker) are also served on plain HTTP
+# (port 80) so clients can avoid the self-signed-cert dance — e.g. SIRA on the
+# HP box uses http://apex-spark-01.local/v1 for the LLM, and NORA can use
+# http://apex-spark-01.local/rerank for cross-encoder reranking, both without
+# CA trust setup. All other paths on HTTP redirect to HTTPS — the relaxation
+# is scoped to these two routes. Remove a handle to go back to HTTPS for it.
 http://{$SITE_ADDRESSES} {
 	handle /v1/* {
 		reverse_proxy vllm:8000
+	}
+	handle_path /rerank/* {
+		reverse_proxy tei-reranker:80
 	}
 	handle {
 		redir https://{host}{uri} 308
