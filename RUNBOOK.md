@@ -109,10 +109,10 @@ docker compose -f compose.inference.yml exec -T vllm \
 
 **TEI reranker** (`tei-reranker` service, route `/rerank/*`) runs in its own
 container using the same TEI image as the embedder but pointed at a
-cross-encoder model. CPU-only — no GPU stake, doesn't compete with
-vLLM/Ollama. Default model `bge-reranker-large`
-(~568M params; ~100-400ms to rerank 25 candidates on CPU/arm64). Picking a
-new reranker means clearing **two** hurdles:
+cross-encoder model. Runs on GPU (~4 GB) alongside the embedder — accounted
+for by `VLLM_GPU_UTIL=0.58` (see README "GPU memory budget"). Default model
+`bge-reranker-large` (~568M params). Picking a new reranker means clearing
+**two** hurdles:
 
   - **ONNX export on HF** — TEI's ORT backend loads `onnx/model.onnx`.
     `curl -sL 'https://huggingface.co/api/models/<org>/<model>/tree/main?recursive=true' | grep onnx`
@@ -158,21 +158,23 @@ query, sorted response. Defaults for bge-reranker-large:
 | `--max-client-batch-size` | 32 | Hard cap on `texts[]` length per request | If you need >32 candidates per call — bump in the tei-reranker command |
 | `--max-batch-tokens` | 16384 | Token budget for one internal forward-pass batch | Rarely; only if many long candidates make a single request OOM |
 | Per-pair max length | 512 tokens | Model architecture limit (bge-reranker-large = XLM-RoBERTa base) | Pass `truncate: true` in the body for chunks longer than ~450 tokens, or pre-chunk smaller |
-| **Internal forward-pass batch** | **8** | ORT backend cap on CPU/arm64 — TEI logs `Forcing max_batch_requests=8` at startup | Not tunable — architectural limit of the ORT backend |
 
-Practical latencies on CPU/arm64 with default settings (bge-reranker-large):
+On the GPU build (local/tei:gb10) the Candle backend processes all candidates
+in a single forward pass — the 8-pair `max_batch_requests` cap is an ORT/CPU
+constraint that doesn't apply here. Expected latencies on GB10 with default
+settings (bge-reranker-large) — **estimates pending measurement on first
+deploy**:
 
-| Candidates per call | Internal sub-batches | Latency (typical) |
-|---|---|---|
-| 8 | 1 | 80-200 ms |
-| 25 | 4 (8+8+8+1) | 300-700 ms |
-| 32 | 4 (8+8+8+8) | 400-900 ms |
-| 50+ | many — split into parallel calls instead | — |
+| Candidates per call | Latency (estimated) |
+|---|---|
+| 8 | ~10-30 ms |
+| 25 | ~20-60 ms |
+| 32 | ~25-80 ms |
+| 50+ | split into parallel calls (avoids `--max-client-batch-size` cap) |
 
-The ORT backend processes at most 8 pairs per forward pass, so a 25-pair
-request takes ~3-4× the time of an 8-pair request — not 1×. For higher
-throughput, fire multiple smaller-batch requests in parallel rather than
-one giant batch.
+Run a few real calls after the GPU cutover and update these numbers — the
+range above is extrapolated from embedder latencies and may be off by ~2× in
+either direction depending on sequence length distribution.
 
 **Multi-query rerank.** `/rerank` is one query, N texts. For M queries
 each with their own candidates, fire M separate requests in parallel
@@ -208,8 +210,9 @@ Community dashboards to import by ID if you want more: node 1860, cAdvisor 14282
 
 ## Memory rebalancing (vLLM ↔ Ollama)
 
-One lever — `VLLM_GPU_UTIL` (fraction of the full 128 GB pool). Ollama uses what's
-left. See README for the conversion table.
+One lever — `VLLM_GPU_UTIL` (fraction of the full 128 GB pool). The TEI
+services take a fixed ~8 GB off the top; Ollama uses whatever vLLM + TEI
+leave. See README for the conversion table.
 ```bash
 make rebalance util=0.50   # writes .env + restarts vLLM only
 ```

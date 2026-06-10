@@ -137,8 +137,9 @@ docker compose -f compose.inference.yml exec vllm curl -s localhost:8000/v1/mode
 | Consumer | Target | Enforced by |
 |---|---|---|
 | OS + backend services | ~16 GB reserved | left unallocated |
-| **vLLM** — 75% of inference pool | ~84 GB | `VLLM_GPU_UTIL=0.65` (fraction of the **full** 128 GB) |
-| **Ollama** — 25% of inference pool | ~28 GB | `OLLAMA_MAX_LOADED_MODELS=1` + model choice ≤ ~26 GB |
+| **vLLM** — ~66% of inference pool | ~74 GB | `VLLM_GPU_UTIL=0.58` (fraction of the **full** 128 GB) |
+| **TEI** (embedder + reranker) | ~8 GB | accounted for by lowered `VLLM_GPU_UTIL`; each TEI instance grabs what it needs (~4 GB) |
+| **Ollama** — ~25% of inference pool | ~28 GB | `OLLAMA_MAX_LOADED_MODELS=1` + model choice ≤ ~26 GB |
 
 Two facts this depends on:
 - **vLLM pre-allocates at boot**, so `make up` starts it *first* and waits for
@@ -151,16 +152,17 @@ Two facts this depends on:
 
 There is **one lever: `VLLM_GPU_UTIL`** (fraction of the full 128 GB pool that
 vLLM pre-allocates). Ollama has no reservation — it simply uses whatever vLLM
-leaves free, so lowering vLLM's value automatically gives Ollama more, and vice
-versa. The OS + backend services need ~16 GB out of "Ollama's" remainder.
+and TEI leave free, so lowering vLLM's value automatically gives Ollama more,
+and vice versa. The OS + backend services and TEI together need ~24 GB out
+of "Ollama's" remainder.
 
-| `VLLM_GPU_UTIL` | vLLM gets | Left for Ollama (after ~16 GB OS/svc) | Ollama can run |
+| `VLLM_GPU_UTIL` | vLLM gets | Left for Ollama (after ~16 GB OS/svc + ~8 GB TEI) | Ollama can run |
 |---|---|---|---|
-| 0.35 | ~45 GB | ~67 GB | up to a 70B-Q4 |
-| 0.50 | ~64 GB | ~48 GB | a 70B-Q4 (tight) |
-| 0.65 *(default)* | ~84 GB | ~28 GB | ≤32B-Q4 / ≤27B-Q8 |
-| 0.75 | ~96 GB | ~16 GB | small models only (≤14B) |
-| 0.85 | ~109 GB | ~3 GB | effectively vLLM-only |
+| 0.35 | ~45 GB | ~59 GB | up to a 70B-Q4 |
+| 0.50 | ~64 GB | ~40 GB | a 70B-Q4 (tight) |
+| 0.58 *(default)* | ~74 GB | ~30 GB | ≤32B-Q4 / ≤27B-Q8 |
+| 0.65 | ~84 GB | ~20 GB | small models (≤14B) |
+| 0.75 | ~96 GB | ~8 GB | effectively vLLM-only |
 
 **Permanent change** — edit `.env`, then restart vLLM (the only service that
 needs to re-allocate):
@@ -189,7 +191,7 @@ make vllm-start    # reclaims the configured VLLM_GPU_UTIL slice
 | `/v1/*` | vLLM :8000 | OpenAI-compatible chat/completions. **Also served on plain HTTP** (`http://$SITE_HOST/v1/*`) so cert-averse clients (SIRA, generic scripts) can skip TLS. Other paths on HTTP redirect to HTTPS. For Qwen3 / DeepSeek-R1, the reasoning parser is enabled via `VLLM_REASONING_PARSER` in `.env` — `<think>` blocks are routed into `choices[].message.reasoning_content` so `message.content` carries only the clean answer. |
 | `/ollama/*` | Ollama :11434 | Ollama API |
 | `/embed/*` | TEI :80 | embeddings for RAG |
-| `/rerank/*` | tei-reranker :80 | cross-encoder reranking for RAG (Cohere-compatible `/rerank` endpoint). Same TEI image, different model — CPU-only, no GPU stake. **Also served on plain HTTP** (`http://$SITE_HOST/rerank/*`) so cert-averse clients (NORA, RAG pipelines) can skip TLS, same posture as vLLM `/v1/*`. Default model `bge-reranker-large` (~568M, xlm-roberta). Reranker selection requires both ONNX weights on HF and a `model_type` field in config.json — see `.env.example` for the cautionary list (`bge-reranker-v2-m3` lacks ONNX; `jina-reranker-v2-base-multilingual` lacks `model_type`). |
+| `/rerank/*` | tei-reranker :80 | cross-encoder reranking for RAG (Cohere-compatible `/rerank` endpoint). Same TEI image as `/embed`, different model — runs on GPU (~4 GB) alongside the embedder. **Also served on plain HTTP** (`http://$SITE_HOST/rerank/*`) so cert-averse clients (NORA, RAG pipelines) can skip TLS, same posture as vLLM `/v1/*`. Default model `bge-reranker-large` (~568M, xlm-roberta). Reranker selection requires both ONNX weights on HF and a `model_type` field in config.json — see `.env.example` for the cautionary list (`bge-reranker-v2-m3` lacks ONNX; `jina-reranker-v2-base-multilingual` lacks `model_type`). |
 | `/` (root + anything unmatched) | open-webui :8080 | browser chat UI for vLLM (first signup → admin). `/chat` redirects to `/` for backward-compat. |
 | `/apex/*` | *(not wired)* | reserved for your apps; uncomment in `Caddyfile` after adding to `compose.apps.yml` |
 | `/grafana/*` | Grafana :3000 | dashboards (browser auth) |

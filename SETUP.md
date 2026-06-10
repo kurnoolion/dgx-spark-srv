@@ -370,39 +370,55 @@ docker images | sort
 
 ### B2-build. Build TEI from source (no arm64 prebuilt exists)
 
-TEI is in `compose.inference.yml` but its image is `local/tei:cpu-arm64` — you
-build it on the spark. Default below is the **CPU/arm64 build** for v1
-(~15 min, ~50-150ms/embedding, no GPU mem cost). GPU build is an upgrade path.
+TEI is in `compose.inference.yml` but its image must be **BUILT FROM SOURCE on
+the spark** — HuggingFace doesn't publish an arm64 prebuilt. Default below is
+the **GB10/sm_121 GPU build** (~30-60 min, ~5-15ms/embedding, ~4 GB GPU mem
+per instance — embedder + reranker = ~8 GB total, already accounted for by
+`VLLM_GPU_UTIL=0.58` in `.env.example`). CPU/arm64 build is the fallback (see
+end of this section).
 
-#### Pre-pull the build base image (docker build can't `docker pull` either)
-Inspect the FROM line so you know which base to pre-pull via skopeo:
+#### Clone the source + inspect the Dockerfile
 ```bash
 cd ~ && git clone https://github.com/huggingface/text-embeddings-inference
 cd text-embeddings-inference
-grep -m1 ^FROM Dockerfile-arm64
-# typical: FROM ubuntu:22.04 AS base   (or similar)
+grep -m1 ^FROM Dockerfile-cuda
+# Look at what CUDA base it wants. Example output:
+#   FROM nvcr.io/nvidia/cuda:12.6.0-devel-ubuntu22.04 AS base
 ```
-Pre-pull whatever it says (substitute below if different):
+The spark host runs CUDA 13.x. TEI's Dockerfile-cuda may still target a CUDA
+12.x base image — that usually still works on a CUDA 13 host (driver is
+forward-compatible with older CUDA runtimes), but **if the build fails at
+runtime with a CUDA version mismatch**, bump the `FROM` line to the matching
+CUDA 13 base before rebuilding (e.g. `nvcr.io/nvidia/cuda:13.0.0-devel-ubuntu22.04`).
+
+#### Pre-pull the CUDA base image
+Pre-pull whatever the `FROM` line says (substitute the tag you found above):
 ```bash
 cd /data/srv
-make pull-stack images='ubuntu:22.04'    # the FROM base for Dockerfile-arm64
+make pull-stack images='nvcr.io/nvidia/cuda:12.6.0-devel-ubuntu22.04'
 ```
+NGC images need `NGC_API_KEY` set (see A1.3).
 
-#### Build the CPU/arm64 image (v1 default)
+#### Build the GPU image (default)
 ```bash
 cd ~/text-embeddings-inference
-docker build -f Dockerfile-arm64 --platform=linux/arm64 \
+docker build -f Dockerfile-cuda --platform=linux/arm64 \
+  --build-arg CUDA_COMPUTE_CAP=121 \
   --build-arg HTTP_PROXY=$HTTP_PROXY \
   --build-arg HTTPS_PROXY=$HTTPS_PROXY \
   --build-arg NO_PROXY=localhost,127.0.0.1,::1 \
-  -t local/tei:cpu-arm64 .
-docker images | grep tei                  # expect: local/tei  cpu-arm64  ...
+  -t local/tei:gb10 .
+docker images | grep tei                  # expect: local/tei  gb10  ...
 ```
-Build is mostly Rust compilation (~15-20 min on the spark). Watch out for
-`apt-get` or `cargo` failing on TLS errors — if so, the Dockerfile may need
-the proxy ARG declared explicitly. Easiest patch:
+Build is mostly Rust compilation + CUDA kernel compilation (~30-60 min on the
+spark). `CUDA_COMPUTE_CAP=121` targets the GB10 sm_121 architecture; setting
+this wrong (e.g. 80 for A100, 90 for H100) produces a binary that loads but
+crashes on first kernel launch.
+
+Watch out for `apt-get` or `cargo` failing on TLS errors mid-build — if so,
+the Dockerfile may need the proxy ARGs declared explicitly. Easiest patch:
 ```bash
-# add at the top of Dockerfile-arm64 (just under FROM):
+# add at the top of Dockerfile-cuda (just under FROM):
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ARG NO_PROXY
@@ -410,25 +426,38 @@ ENV HTTP_PROXY=$HTTP_PROXY HTTPS_PROXY=$HTTPS_PROXY NO_PROXY=$NO_PROXY
 ```
 …then re-run the docker build.
 
-#### (Optional, upgrade path) GPU build for sm_121
-Build is longer (~30-60 min), needs the CUDA base from NGC:
+After the build, `compose.inference.yml` already references
+`${TEI_IMAGE:-local/tei:gb10}` for both `tei` and `tei-reranker` and includes
+the `deploy.resources.reservations.devices` blocks — no compose edits needed.
+TEI services are ready to start when `make up` runs.
+
+#### Fallback: CPU/arm64 build (no GPU stake)
+
+If the GPU build fails for any reason — or you want to free ~8 GB for vLLM
+and tolerate slower embedding/rerank — fall back to CPU:
+
 ```bash
-make pull-stack images='nvcr.io/nvidia/cuda:12.6.0-devel-ubuntu22.04'  # adjust per Dockerfile-cuda's FROM
-docker build -f Dockerfile-cuda --platform=linux/arm64 \
-  --build-arg CUDA_COMPUTE_CAP=121 \
+# Pre-pull the arm64 base (typically ubuntu:22.04 — verify with grep ^FROM Dockerfile-arm64)
+make pull-stack images='ubuntu:22.04'
+
+cd ~/text-embeddings-inference
+docker build -f Dockerfile-arm64 --platform=linux/arm64 \
   --build-arg HTTP_PROXY=$HTTP_PROXY \
   --build-arg HTTPS_PROXY=$HTTPS_PROXY \
-  -t local/tei:gb10 .
+  --build-arg NO_PROXY=localhost,127.0.0.1,::1 \
+  -t local/tei:cpu-arm64 .
 ```
-Then in `.env`:
-```
-TEI_IMAGE=local/tei:gb10
-```
-And re-add the GPU reservation block to `tei:` in `compose.inference.yml`
-(copy the structure from the `vllm:` service). Drop `VLLM_GPU_UTIL` ~0.03 to
-make ~4 GB headroom for TEI's GPU footprint, or you'll OOM.
 
-After either build, `tei` is ready to start when `make up` runs.
+Then in `/data/srv/.env`:
+```
+TEI_IMAGE=local/tei:cpu-arm64
+VLLM_GPU_UTIL=0.65          # reclaim the ~8 GB freed by CPU TEI
+```
+
+And in `compose.inference.yml`, remove the `deploy.resources.reservations.devices`
+blocks from BOTH the `tei` and `tei-reranker` services (otherwise Compose tries
+to attach a GPU that the CPU image won't use). CPU build latency:
+~50-150 ms/embedding, ~300-700 ms to rerank 25 candidates (vs ~20-60 ms on GPU).
 
 #### Fallback: build off-box, sneakernet the tarball
 
