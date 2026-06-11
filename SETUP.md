@@ -552,7 +552,7 @@ make models
 ```bash
 make health                          # expect PASS / WARN, possibly dcgm-exporter FAIL
 ```
-Browse `https://$SITE_HOST/grafana` (admin / `GRAFANA_PASSWORD`) → **APEX — Service Memory** dashboard.
+Browse `http://$SITE_HOST/grafana/` (admin / `GRAFANA_PASSWORD`) → **APEX — Service Memory** dashboard.
 
 **If `dcgm-exporter` is the only FAIL** (Open decision #5), bump its image tag to an aarch64 one for the box's DCGM version in `compose.observability.yml`. GPU Grafana panels stay blank until then; nothing else breaks.
 

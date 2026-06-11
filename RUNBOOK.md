@@ -27,6 +27,43 @@ cd /data/srv
 | Check `/data` split usage | `sudo xfs_quota -x -c 'report -h' /data` |
 | Check docker reclaimable space | `make prune-status` |
 
+## Public endpoints
+
+Caddy on `:80` is the single ingress. Replace `<host>` with `apex-spark-01.local`,
+the spark's IP, or `localhost` if running on-box.
+
+| Service | URL | Method | Notes |
+|---|---|---|---|
+| vLLM (OpenAI-compatible) | `http://<host>/v1/...` | POST | e.g. `/v1/chat/completions`, `/v1/models`. Prefix preserved. |
+| TEI embeddings | `http://<host>/embed/embed` | POST | Caddy strips `/embed`, TEI's own endpoint is `/embed` — hence the doubled path. |
+| TEI reranker | `http://<host>/rerank/rerank` | POST | Same prefix-strip quirk as embed. Cohere-compatible schema. |
+| Ollama | `http://<host>/ollama/...` | POST | Prefix stripped — e.g. `/ollama/api/generate` → `/api/generate`. |
+| Grafana | `http://<host>/grafana/` | GET | Prefix preserved (Grafana serves from `/grafana`). |
+| Open-WebUI | `http://<host>/` | GET | SPA at root. `/chat` and `/chat/` redirect here. |
+
+**Default model names** (from `.env`, override per `make rebalance` /
+`.env` edits + service restart):
+
+| Role | Model | Notes |
+|---|---|---|
+| Embedder (`TEI_MODEL`) | `bge-m3` | 1024-dim, multilingual, 8192-token context. |
+| Reranker (`TEI_RERANKER_MODEL`) | `bge-reranker-large` | xlm-roberta cross-encoder, 512-token context per (query, candidate) pair. |
+| LLM (`VLLM_MODEL`) | depends on `.env` | `curl -s http://<host>/v1/models` for the exact `id` clients must pass. |
+
+**Request schemas** (TEI OpenAPI — Cohere-compatible for rerank):
+
+```bash
+# Embed
+curl -s http://<host>/embed/embed -H 'Content-Type: application/json' \
+  -d '{"inputs":"hello world","truncate":true}'
+# → number[][]  (one vector per input; pass an array of strings to batch)
+
+# Rerank
+curl -s http://<host>/rerank/rerank -H 'Content-Type: application/json' \
+  -d '{"query":"what is LTE","texts":["4G cellular standard","an espresso method"],"truncate":true}'
+# → [{"index":int,"score":float}, ...]  sorted desc
+```
+
 ## Daily health check (1 minute)
 
 ```bash
@@ -52,7 +89,7 @@ make deploy             # git pull-equivalent: pull images + recreate
 ```
 Service names: `postgres redis qdrant minio vllm ollama tei caddy prometheus grafana cadvisor node-exporter dcgm-exporter` (+ your apps from `compose.apps.yml` once you add them).
 
-Internal endpoints are **not** published to the host (only Caddy's 443/80 are).
+Internal endpoints are **not** published to the host (only Caddy's :80 is).
 To probe a backend directly:
 ```bash
 docker compose -f compose.inference.yml exec vllm curl -fsS localhost:8000/health
@@ -132,7 +169,7 @@ Verified drop-in alternatives that clear both:
   - `mixedbread-ai/mxbai-rerank-base-v1` — ~184M, deberta-v2.
 Quick test:
 ```bash
-curl -sk https://apex-spark-01.local/rerank/rerank \
+curl -s http://apex-spark-01.local/rerank/rerank \
   -H 'Content-Type: application/json' \
   -d '{
     "query": "What is LTE?",
@@ -190,7 +227,7 @@ set `TEI_RERANKER_MODEL=<bare-name>` in `.env`, then `make restart svc=tei-reran
 Full plain-language guide in **[OBSERVABILITY.md](OBSERVABILITY.md)**.
 Cheat sheet for the operational view:
 
-Grafana at `https://$SITE_HOST/grafana` (admin / `GRAFANA_PASSWORD`) → **APEX —
+Grafana at `http://$SITE_HOST/grafana/` (admin / `GRAFANA_PASSWORD`) → **APEX —
 Service Memory** dashboard: per-container memory, % of limit, host memory, GPU
 framebuffer. Use it to capture real per-service RAM before finalizing the split.
 
@@ -325,7 +362,6 @@ restart the dependent services.
 | Container "exec format error" / very slow | x86-only image under emulation | replace with arm64/multi-arch image |
 | 502 from gateway on a route | backend down or unhealthy | `make ps`; `make logs svc=<backend>` |
 | API returns unexpected 401/403 | a backend's own auth (Grafana/Postgres/MinIO) | gateway is unauthenticated — check the specific backend's logs/credentials |
-| Browser cert warning | `tls internal` self-signed | expected until corp PKI certs installed; trust the CA or use VPN |
 | Disk full on `/` | logs growth; or docker if not on own LV | `journalctl --vacuum-size=500M`; `make prune`; ensure `make install-system` ran (caps logs) |
 | `/var/lib/docker` full | NGC image churn + build cache | `make prune`; `lvextend` from reserve; verify log rotation installed |
 | `/data` full | models or RAG data over ceiling | see "Disk/quota full" above |

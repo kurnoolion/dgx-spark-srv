@@ -185,26 +185,27 @@ make vllm-start    # reclaims the configured VLLM_GPU_UTIL slice
 > grabbed its slice) **before** Ollama loads a model, or Ollama may take memory
 > vLLM then can't reclaim without a restart.
 
-## Routes (via Caddy, https://$SITE_HOST)
+## Routes (via Caddy, http://$SITE_HOST)
 | Path | Backend | Use |
 |---|---|---|
-| `/v1/*` | vLLM :8000 | OpenAI-compatible chat/completions. **Also served on plain HTTP** (`http://$SITE_HOST/v1/*`) so cert-averse clients (SIRA, generic scripts) can skip TLS. Other paths on HTTP redirect to HTTPS. For Qwen3 / DeepSeek-R1, the reasoning parser is enabled via `VLLM_REASONING_PARSER` in `.env` — `<think>` blocks are routed into `choices[].message.reasoning_content` so `message.content` carries only the clean answer. |
-| `/ollama/*` | Ollama :11434 | Ollama API |
-| `/embed/*` | TEI :80 | embeddings for RAG |
-| `/rerank/*` | tei-reranker :80 | cross-encoder reranking for RAG (Cohere-compatible `/rerank` endpoint). Same TEI image as `/embed`, different model — runs on GPU (~4 GB) alongside the embedder. **Also served on plain HTTP** (`http://$SITE_HOST/rerank/*`) so cert-averse clients (NORA, RAG pipelines) can skip TLS, same posture as vLLM `/v1/*`. Default model `bge-reranker-large` (~568M, xlm-roberta). Reranker selection requires both ONNX weights on HF and a `model_type` field in config.json — see `.env.example` for the cautionary list (`bge-reranker-v2-m3` lacks ONNX; `jina-reranker-v2-base-multilingual` lacks `model_type`). |
+| `/v1/*` | vLLM :8000 | OpenAI-compatible chat/completions. Prefix preserved. For Qwen3 / DeepSeek-R1, the reasoning parser is enabled via `VLLM_REASONING_PARSER` in `.env` — `<think>` blocks are routed into `choices[].message.reasoning_content` so `message.content` carries only the clean answer. |
+| `/ollama/*` | Ollama :11434 | Ollama API (prefix stripped) |
+| `/embed/*` | TEI :80 | embeddings for RAG (prefix stripped — POST to `/embed/embed`) |
+| `/rerank/*` | tei-reranker :80 | cross-encoder reranking for RAG (Cohere-compatible `/rerank` endpoint, POST to `/rerank/rerank`). Same TEI image as `/embed`, different model — runs on GPU (~4 GB) alongside the embedder. Default model `bge-reranker-large` (~568M, xlm-roberta). Reranker selection requires both ONNX weights on HF and a `model_type` field in config.json — see `.env.example` for the cautionary list (`bge-reranker-v2-m3` lacks ONNX; `jina-reranker-v2-base-multilingual` lacks `model_type`). |
 | `/` (root + anything unmatched) | open-webui :8080 | browser chat UI for vLLM (first signup → admin). `/chat` redirects to `/` for backward-compat. |
 | `/apex/*` | *(not wired)* | reserved for your apps; uncomment in `Caddyfile` after adding to `compose.apps.yml` |
 | `/grafana/*` | Grafana :3000 | dashboards (browser auth) |
 
 ## Reaching the stack from other machines
 
-**Always use the hostname (`$SITE_HOST`) in URLs, never the raw IP.** Caddy's
-TLS stack (Go crypto/tls) has a long-standing issue with IP-literal SNI —
-`openssl s_client` works, but `curl`/`wget`/Python clients fail with
-`tlsv1 alert internal error` when the URL is `https://<ip>/`. Hostname SNI
-works for every client.
+Caddy listens on `:80` with no Host-header restriction, so any of these reach
+the stack:
 
-To make this work on every machine that needs access:
+- The hostname — `http://apex-spark-01.local` via DNS, mDNS, or `/etc/hosts`.
+- The raw IP — `http://<spark-ip>`.
+- `localhost` (on-box only).
+
+To make hostname access work from client machines, pick whichever's easiest:
 
 - **DNS** (cleanest): get an A record `apex-spark-01.<corp-domain>` →
   spark's IP in corp DNS.
@@ -216,17 +217,15 @@ To make this work on every machine that needs access:
   ```
   Windows: `C:\Windows\System32\drivers\etc\hosts` (edit as Admin).
 
-`.env` should always have `SITE_HOST=apex-spark-01.local` (or your real
-hostname) — never the IP. The `SITE_ADDRESSES` extension point exists for
-listing multiple hostnames if you want, but **don't put an IP in there**;
-the cert gets issued but clients can't use it.
-
 ## Securing the gateway
-The gateway is **currently unauthenticated** — `Caddyfile` proxies directly to
-each backend. This is only acceptable if the box lives on a trusted VPN /
-restricted network where every reachable user is allowed to use every service.
+The gateway is **currently unauthenticated and HTTP-only** — `Caddyfile`
+proxies directly to each backend over cleartext. This is only acceptable if
+the box lives on a trusted VPN / restricted network where every reachable
+user is allowed to use every service.
 
-Still do: keep the box VPN-only and swap `tls internal` for corp PKI certs.
+Still do: keep the box VPN-only. For HTTPS, restore the `tls internal` site
+block from git history (commit before `Caddy: HTTP-only`) and use corp PKI
+certs for production.
 
 If you later need auth, three lightweight options:
 - **Basic auth (htpasswd)** per route via Caddy's `basicauth` directive.
@@ -240,7 +239,7 @@ If you later need auth, three lightweight options:
 
 ## Observability
 Prometheus + Grafana + exporters come up with `make up`. Grafana is at
-`https://$SITE_HOST/grafana` (login `admin` / `GRAFANA_PASSWORD`). For the
+`http://$SITE_HOST/grafana/` (login `admin` / `GRAFANA_PASSWORD`). For the
 plain-language walkthrough — how Prometheus/Grafana/exporters fit together,
 panel-by-panel guide to the **Service Memory** dashboard, useful PromQL
 queries, and the `make watch-vllm` / `make watch-vllm-load` command-line
