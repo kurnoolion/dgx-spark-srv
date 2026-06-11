@@ -1,38 +1,12 @@
-# Single TLS entrypoint — NO gateway auth (relies on VPN/network restrictions).
-# `tls internal` issues a self-signed cert from Caddy's internal CA — fine for a
-# VPN-only box. For corp PKI, replace with:
-#   tls /etc/caddy/cert.pem /etc/caddy/key.pem
+# HTTP-only — VPN/network-restricted box, NO gateway auth.
+# For HTTPS (tls internal + SITE_ADDRESSES site block), see git history.
+# For auth, see git history for the oauth2-proxy version, or add `basicauth`
+# blocks per route, or restore forward_auth to an auth proxy.
 #
-# If you ever need auth back, see git history for the oauth2-proxy version, or
-# add `basicauth` blocks per route, or restore forward_auth to an auth proxy.
+# `:80` matches any Host header on port 80, so http://localhost,
+# http://apex-spark-01.local, and http://<ip> all route here.
 
-# ── Plain-HTTP exceptions for vLLM + reranker ────────────────────────────────
-# Both /v1/* (vLLM) and /rerank/* (tei-reranker) are also served on plain HTTP
-# (port 80) so clients can avoid the self-signed-cert dance — e.g. SIRA on the
-# HP box uses http://apex-spark-01.local/v1 for the LLM, and NORA can use
-# http://apex-spark-01.local/rerank for cross-encoder reranking, both without
-# CA trust setup. All other paths on HTTP redirect to HTTPS — the relaxation
-# is scoped to these two routes. Remove a handle to go back to HTTPS for it.
-http://{$SITE_ADDRESSES} {
-	handle /v1/* {
-		reverse_proxy vllm:8000
-	}
-	handle_path /rerank/* {
-		reverse_proxy tei-reranker:80
-	}
-	handle {
-		redir https://{host}{uri} 308
-	}
-}
-
-{$SITE_ADDRESSES} {
-	# Single comma-separated list — Caddy parses it as multiple site addresses
-	# and issues one cert from its internal CA with all of them in the SAN list.
-	# Default (in .env.example): SITE_ADDRESSES=${SITE_HOST}  (hostname only)
-	# Multi-access: SITE_ADDRESSES=apex-spark-01.local, 10.x.x.x  (hostname + IP)
-	# Note: WEBUI_URL in compose.apps.yml still uses SITE_HOST (single value).
-	tls internal
-
+:80 {
 	# OpenAI-compatible LLM API (vLLM) — /v1 path preserved.
 	handle /v1/* {
 		reverse_proxy vllm:8000
