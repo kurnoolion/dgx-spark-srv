@@ -381,23 +381,54 @@ end of this section).
 ```bash
 cd ~ && git clone https://github.com/huggingface/text-embeddings-inference
 cd text-embeddings-inference
-grep -m1 ^FROM Dockerfile-cuda
-# Look at what CUDA base it wants. Example output:
-#   FROM nvcr.io/nvidia/cuda:12.6.0-devel-ubuntu22.04 AS base
+grep ^FROM Dockerfile-cuda
+# Dockerfile-cuda is multi-stage and has TWO FROM lines that hit the registry.
+# Example output (as of mid-2026):
+#   FROM nvidia/cuda:12.9.1-devel-ubuntu24.04 AS build-base
+#   FROM nvidia/cuda:12.9.1-runtime-ubuntu24.04 AS base
+# Note the bare `nvidia/cuda:` prefix — that resolves to docker.io, not nvcr.io.
 ```
 The spark host runs CUDA 13.x. TEI's Dockerfile-cuda may still target a CUDA
 12.x base image — that usually still works on a CUDA 13 host (driver is
 forward-compatible with older CUDA runtimes), but **if the build fails at
-runtime with a CUDA version mismatch**, bump the `FROM` line to the matching
-CUDA 13 base before rebuilding (e.g. `nvcr.io/nvidia/cuda:13.0.0-devel-ubuntu22.04`).
+runtime with a CUDA version mismatch**, bump the `FROM` lines to the matching
+CUDA 13 base before rebuilding (e.g. `nvcr.io/nvidia/cuda:13.0.0-devel-ubuntu24.04`).
 
-#### Pre-pull the CUDA base image
-Pre-pull whatever the `FROM` line says (substitute the tag you found above):
+#### Pre-pull the CUDA base images
+The Dockerfile needs **both** the `devel` and `runtime` tags (one per FROM
+line). Build-time `docker pull` from `docker.io/nvidia/cuda` routes through
+`mirror.gcr.io`, which has been observed to return `EOF` from the spark — so
+we pre-pull from `nvcr.io` (NVIDIA's canonical registry) and then re-tag so
+the Dockerfile's `nvidia/cuda:` FROM lines find them locally without going
+out to docker.io at all.
+
 ```bash
 cd /data/srv
-make pull-stack images='nvcr.io/nvidia/cuda:12.6.0-devel-ubuntu22.04'
+make pull-stack images='nvcr.io/nvidia/cuda:12.9.1-devel-ubuntu24.04'
+make pull-stack images='nvcr.io/nvidia/cuda:12.9.1-runtime-ubuntu24.04'
+
+# Retag both into the bare `nvidia/cuda:` namespace the Dockerfile expects.
+# Tagging is a metadata-only operation — no extra disk, no extra pull.
+docker tag nvcr.io/nvidia/cuda:12.9.1-devel-ubuntu24.04   nvidia/cuda:12.9.1-devel-ubuntu24.04
+docker tag nvcr.io/nvidia/cuda:12.9.1-runtime-ubuntu24.04 nvidia/cuda:12.9.1-runtime-ubuntu24.04
+
+docker image ls | grep -i 'nvidia/cuda.*12.9.1'   # confirm 4 rows: 2 nvcr.io + 2 bare
 ```
-NGC images need `NGC_API_KEY` set (see A1.3).
+Substitute the exact tags you saw in the `grep ^FROM` output above if TEI's
+upstream has moved on. NGC images need `NGC_API_KEY` set (see A1.3).
+
+If `make pull-stack` doesn't land the images into the docker daemon (only
+into a tarball cache — check with `docker image ls | grep -i cuda`), run
+`docker load -i <path-to-tar>` first, then retag.
+
+As a last-resort fallback — if pulling from nvcr.io also fights you — patch
+the Dockerfile's two FROM lines to use `nvcr.io/nvidia/cuda:` directly so no
+retag is needed:
+```bash
+sed -i 's|^FROM nvidia/cuda:|FROM nvcr.io/nvidia/cuda:|' Dockerfile-cuda
+grep ^FROM Dockerfile-cuda                # confirm both lines now nvcr.io
+```
+Drop the patch later with `git checkout Dockerfile-cuda`.
 
 #### Build the GPU image (default)
 ```bash
