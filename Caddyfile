@@ -12,15 +12,19 @@
 		reverse_proxy vllm:8000
 	}
 
-	# Embeddings (TEI) — prefix preserved; TEI listens at bare /embed.
-	# Match both bare /embed and /embed/* so a POST /embed isn't a 404.
-	handle /embed /embed/* {
+	# TEI listens at bare /embed and /rerank, so we match both the bare path
+	# and any subpaths, and use `handle` (preserve prefix). `handle` shorthand
+	# only takes ONE path, so use named matchers for the multi-path case.
+	@tei_embed   path /embed /embed/*
+	@tei_rerank  path /rerank /rerank/*
+
+	# Embeddings (TEI).
+	handle @tei_embed {
 		reverse_proxy tei:80
 	}
 
-	# Reranking (second TEI instance, cross-encoder model) — same as /embed:
-	# TEI's /rerank is a bare-path endpoint; preserve prefix and match the bare path.
-	handle /rerank /rerank/* {
+	# Reranking (second TEI instance, cross-encoder model).
+	handle @tei_rerank {
 		reverse_proxy tei-reranker:80
 	}
 
