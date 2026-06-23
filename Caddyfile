@@ -12,14 +12,15 @@
 		reverse_proxy vllm:8000
 	}
 
-	# Embeddings (TEI) — prefix stripped.
-	handle_path /embed/* {
+	# Embeddings (TEI) — prefix preserved; TEI listens at bare /embed.
+	# Match both bare /embed and /embed/* so a POST /embed isn't a 404.
+	handle /embed /embed/* {
 		reverse_proxy tei:80
 	}
 
-	# Reranking (second TEI instance, cross-encoder model) — prefix stripped.
-	# Hits TEI's /rerank Cohere-compatible endpoint.
-	handle_path /rerank/* {
+	# Reranking (second TEI instance, cross-encoder model) — same as /embed:
+	# TEI's /rerank is a bare-path endpoint; preserve prefix and match the bare path.
+	handle /rerank /rerank/* {
 		reverse_proxy tei-reranker:80
 	}
 
