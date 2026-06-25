@@ -33,6 +33,12 @@ services:
     # tokens out of message.content into message.reasoning_content.
     # vLLM 0.8+ (NGC 25.11+) dropped --enable-reasoning — passing
     # --reasoning-parser alone is sufficient.
+    #
+    # VLLM_ROPE_SCALING is a JSON dict passed straight to vLLM's --rope-scaling
+    # (Qwen3 long-context via YaRN, etc.). Leave BLANK for native context so
+    # the flag is omitted entirely — YaRN degrades quality at short prompts
+    # and there's no auto-engage in vLLM.
+    #
     # NB: $$ escapes a literal $ past Compose's variable interpolation. Shell
     # variables we define here (M, LOAD, SERVED) must use $$ so Compose passes
     # them through unchanged; ${VLLM_*} should stay single-$ to be expanded by
@@ -54,6 +60,7 @@ services:
         --max-model-len "${VLLM_MAX_LEN}"
         --host 0.0.0.0 --port 8000
         ${VLLM_REASONING_PARSER:+--reasoning-parser "${VLLM_REASONING_PARSER}"}
+        ${VLLM_ROPE_SCALING:+--rope-scaling '${VLLM_ROPE_SCALING}'}
     environment:
       HF_TOKEN: ${HF_TOKEN}
       HF_HUB_ENABLE_HF_TRANSFER: "1"
