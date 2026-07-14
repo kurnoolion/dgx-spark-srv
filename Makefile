@@ -13,10 +13,11 @@ SHELL := /bin/bash
 
 CORE      := -f docker-compose.yml
 INFER     := -f compose.inference.yml
+SWITCH    := -f compose.switch.yml
 GATEWAY   := -f compose.gateway.yml
 APPS      := -f compose.apps.yml
 OBS       := -f compose.observability.yml
-COMPOSE   := docker compose $(CORE) $(INFER) $(GATEWAY) $(APPS) $(OBS)
+COMPOSE   := docker compose $(CORE) $(INFER) $(SWITCH) $(GATEWAY) $(APPS) $(OBS)
 
 .PHONY: init up down restart logs ps pull deploy models gpu health rebalance vllm-stop vllm-start backup prune prune-status install-system download-models pull-stack watch-vllm watch-vllm-load
 
@@ -44,7 +45,11 @@ up:
 	docker compose $(INFER) up -d vllm
 	@echo "waiting for vLLM to allocate + load model..."
 	@until docker compose $(INFER) exec -T vllm curl -fsS localhost:8000/health >/dev/null 2>&1; do sleep 5; done
-	docker compose $(INFER) up -d ollama tei
+	docker compose $(INFER) up -d ollama tei tei-reranker
+	# Create (but do NOT start) the vllm-vl container so model-switch can start
+	# it later via the Docker API. `--profile manual` unlocks the profiled service.
+	docker compose --profile manual $(INFER) create vllm-vl
+	docker compose $(SWITCH) up -d model-switch
 	docker compose $(GATEWAY) $(APPS) $(OBS) up -d
 	@echo "stack up."
 

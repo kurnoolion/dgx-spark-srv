@@ -7,9 +7,13 @@
 # http://apex-spark-01.local, and http://<ip> all route here.
 
 :80 {
-	# OpenAI-compatible LLM API (vLLM) — /v1 path preserved.
+	# OpenAI-compatible LLM API — routed via model-switch (compose.switch.yml),
+	# NOT directly to a vllm backend. model-switch owns vllm-text/vllm-vl
+	# lifecycle: only one vllm runs at a time; a request with a different
+	# `model` field triggers a swap (or gets 409 if the other model is busy).
+	# Both text and VL models appear in /v1/models regardless of which is loaded.
 	handle /v1/* {
-		reverse_proxy vllm:8000
+		reverse_proxy model-switch:9000
 	}
 
 	# TEI listens at bare /embed and /rerank, so we match both the bare path

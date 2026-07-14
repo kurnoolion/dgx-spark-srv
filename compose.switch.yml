@@ -1,0 +1,40 @@
+# model-switch — router that owns vLLM lifecycle so only one model is loaded
+# at a time. Fronts vllm-text and vllm-vl; advertises both on /v1/models;
+# stops the current backend and starts the requested one when the caller
+# sends a different `model` field.
+#
+# SECURITY: mounts the host Docker socket — root-equivalent on this box.
+# Acceptable here (single-tenant, VPN-only). If this box ever grows into a
+# shared/exposed deployment, replace with a scoped socket-proxy (e.g.
+# tecnativa/docker-socket-proxy configured for container start/stop only).
+#
+# Caddy routes /v1/* here instead of directly to vllm — see Caddyfile.
+networks:
+  apex:
+    name: apex
+
+services:
+  model-switch:
+    build: ./model-switch
+    image: local/model-switch:1
+    environment:
+      # Model names MUST match the --served-model-name each vLLM backend
+      # advertises. For the default resolver, that is the basename of the
+      # loaded path (e.g. Qwen3-32B-AWQ) or the HF repo ID.
+      TEXT_MODEL_NAME: ${TEXT_MODEL_NAME:-Qwen3-32B-AWQ}
+      TEXT_CONTAINER: srv-vllm-1
+      TEXT_UPSTREAM: http://vllm:8000
+      VL_MODEL_NAME: ${VL_MODEL_NAME:-Qwen3-VL-8B-Instruct}
+      VL_CONTAINER: srv-vllm-vl-1
+      VL_UPSTREAM: http://vllm-vl:8000
+      READY_TIMEOUT_S: "300"    # cold start of Qwen3-32B can hit ~180s; give slack
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [apex]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

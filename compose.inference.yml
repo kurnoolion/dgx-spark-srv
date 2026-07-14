@@ -93,6 +93,67 @@ services:
       retries: 10
       start_period: 300s          # large models take minutes to load
 
+  # ── vLLM VL — vision-language model, mutually exclusive with the text vllm ──
+  # Owned by model-switch (compose.switch.yml): started when a client asks for
+  # VL_MODEL_NAME, stopped when a client asks for the text model.
+  #
+  # `profiles: [manual]` means `docker compose up -d` will NOT auto-start this;
+  # model-switch starts/stops it via the Docker API. To bring it up outside
+  # the switcher for debugging: `docker compose --profile manual up -d vllm-vl`.
+  #
+  # Memory: when active, the text vllm is stopped, so this service can claim
+  # a large slice of the 128 GB pool. Default 0.35 (~45 GB) is generous for
+  # an 8B VLM; bump for 32B FP8 (see VL_GPU_UTIL in .env.example).
+  vllm-vl:
+    profiles: ["manual"]
+    image: nvcr.io/nvidia/vllm:25.11-py3
+    # Same VLLM_MODEL-style resolver as the text vllm service.
+    # Note: --limit-mm-per-prompt accepts JSON in vLLM 0.10+; older forms
+    # (image=N) were deprecated. See vllm issue #21615.
+    command:
+      - sh
+      - -c
+      - >
+        M="${VL_MODEL:-Qwen/Qwen3-VL-8B-Instruct}";
+        case "$$M" in
+          /*)   LOAD="$$M";             SERVED="$${M##*/}" ;;
+          */*)  LOAD="$$M";             SERVED="$${M##*/}" ;;
+          *)    LOAD="/data/local/$$M"; SERVED="$$M" ;;
+        esac;
+        echo "vLLM-VL loading: $$LOAD   (API model name: $$SERVED)";
+        exec vllm serve "$$LOAD"
+        --served-model-name "$$SERVED"
+        --gpu-memory-utilization "${VL_GPU_UTIL:-0.35}"
+        --max-model-len "${VL_MAX_LEN:-32768}"
+        --limit-mm-per-prompt '{"image":${VL_MAX_IMAGES:-6}}'
+        --host 0.0.0.0 --port 8000
+    environment:
+      HF_TOKEN: ${HF_TOKEN}
+      HF_HUB_ENABLE_HF_TRANSFER: "1"
+      HF_HOME: /data/hf-cache
+    volumes:
+      - /data/models:/data
+    ipc: host
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    networks: [apex]
+    # NO restart policy — model-switch owns lifecycle. If this restarted
+    # automatically it would fight the switcher's stop() calls.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
   # ── Ollama — 25% of inference pool (~28GB; enforced by 1-model-at-a-time) ──
   ollama:
     image: ollama/ollama:latest
