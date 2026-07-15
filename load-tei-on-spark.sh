@@ -34,7 +34,7 @@ for arg in "$@"; do
 done
 
 # ── preflight ──
-[[ -f "$TAR" ]] || { echo "ERROR tarball not found: $TAR" >&2; echo "  build it on WSL: sudo ~/work/build-tei-arm64.sh"; echo "  then transfer:    rsync -av ~/work/tei-cpu-arm64.tar <user>@spark-1d46:/tmp/"; exit 1; }
+[[ -f "$TAR" ]] || { echo "ERROR tarball not found: $TAR" >&2; echo "  build it off-box (docker + buildx + qemu-user on any linux host)"; echo "  then transfer the tarball to this host at $TAR"; echo "  see SETUP.md Part B2-build fallback for the full recipe"; exit 1; }
 command -v docker >/dev/null || { echo "ERROR docker not installed"; exit 1; }
 docker info >/dev/null 2>&1 || { echo "ERROR can't reach docker daemon (in docker group? newgrp docker)"; exit 1; }
 

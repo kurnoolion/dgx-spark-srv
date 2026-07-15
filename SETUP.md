@@ -14,9 +14,8 @@ All of these work with normal host network (your corp proxy is enough). They
 **don't pull any docker images** — those are all in Part B.
 
 ### A1. Preflight — get the bundle on the box, confirm hardware
-1. Copy the bundle to a **temporary** location — *not* `/data/srv` (it doesn't exist yet):
+1. Copy the bundle onto spark at a **temporary** location — *not* `/data/srv` (it doesn't exist yet). Use whatever transfer method suits your setup — `git clone`, `rsync`, `scp`, etc. — then land at `~/dgx-spark-srv` (or any writable path outside `/data`):
    ```bash
-   rsync -av ~/work/dgx-spark-srv/  user@spark:~/dgx-spark-srv/
    cd ~/dgx-spark-srv
    ```
 2. Confirm GPU is visible (skip any `docker run` smoke tests — those require Part B):
@@ -494,19 +493,22 @@ to attach a GPU that the CPU image won't use). CPU build latency:
 
 If `docker build` on the spark keeps fighting your corp proxy (BuildKit
 manifest resolution, cargo fetch, apt-get TLS — every layer has its own opinion),
-build on another machine with internet (your WSL is fine — use QEMU emulation).
+build on another machine with unrestricted internet (any linux host with
+docker + buildx + qemu-user works — an x86 workstation, WSL, cloud VM, etc.).
 
-**On WSL:** use `~/work/build-tei-arm64.sh` (a separate script outside this
-bundle — does emulation setup + buildx + clone + build + `docker save`):
+**Off-box build:** a `build-tei-arm64.sh` script (kept outside this bundle;
+does qemu-user registration + buildx + clone of upstream TEI + build +
+`docker save`) will produce a `tei-cpu-arm64.tar` image tarball:
 ```bash
-sudo ~/work/build-tei-arm64.sh                    # ~30-60 min, unattended
-# output: ~/work/tei-cpu-arm64.tar (~1-2 GB)
+sudo ./build-tei-arm64.sh                         # ~30-60 min, unattended
+# output: ./tei-cpu-arm64.tar (~1-2 GB)
 ```
 
 **Transfer + load on spark:**
 ```bash
-# from WSL:
-rsync -av ~/work/tei-cpu-arm64.tar <user>@spark-1d46:/tmp/
+# from the build host — pick whichever transfer works for you:
+rsync -av ./tei-cpu-arm64.tar <user>@<spark-host>:/tmp/
+# or scp, or a shared network mount, or a USB drive, etc.
 
 # on spark:
 cd /data/srv
@@ -522,12 +524,12 @@ the tei container.
 **Or via GitHub release** (if direct network to spark isn't an option — release
 assets hold up to 2 GB):
 ```bash
-# from WSL:
-gh release create tei-cpu-arm64-$(date +%Y%m%d) ~/work/tei-cpu-arm64.tar \
-  --repo kurnoolion/dgx-spark-srv --title 'TEI CPU arm64 build'
+# from the build host:
+gh release create tei-cpu-arm64-$(date +%Y%m%d) ./tei-cpu-arm64.tar \
+  --repo <your-fork>/dgx-spark-srv --title 'TEI CPU arm64 build'
 
 # on spark:
-gh release download tei-cpu-arm64-<date> --repo kurnoolion/dgx-spark-srv \
+gh release download tei-cpu-arm64-<date> --repo <your-fork>/dgx-spark-srv \
   --pattern tei-cpu-arm64.tar --dir /tmp/
 ./load-tei-on-spark.sh --restart --cleanup
 ```
