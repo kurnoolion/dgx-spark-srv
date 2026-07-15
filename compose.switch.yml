@@ -24,7 +24,7 @@ services:
       TEXT_MODEL_NAME: ${TEXT_MODEL_NAME:-Qwen3-32B-AWQ}
       TEXT_CONTAINER: srv-vllm-1
       TEXT_UPSTREAM: http://vllm:8000
-      VL_MODEL_NAME: ${VL_MODEL_NAME:-Qwen3-VL-8B-Instruct}
+      VL_MODEL_NAME: ${VL_MODEL_NAME:-Qwen3-VL-32B-Instruct-AWQ}
       VL_CONTAINER: srv-vllm-vl-1
       VL_UPSTREAM: http://vllm-vl:8000
       READY_TIMEOUT_S: "300"    # cold start of Qwen3-32B can hit ~180s; give slack

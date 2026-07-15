@@ -1,6 +1,6 @@
 # Stage 1 — Diagram → Structured JSON
 
-**Model:** `Qwen3-VL-8B-Instruct` (or 32B FP8)
+**Model:** `Qwen3-VL-32B-Instruct-AWQ` (or 8B fallback)
 **Endpoint:** `POST http://apex-spark-01.local/v1/chat/completions`
 **Purpose:** Have the VLM *see* the diagram and emit a structured skeleton.
 Do NOT ask the VLM to also emit Mermaid/PlantUML in this stage — VLMs
@@ -91,7 +91,7 @@ in the extraction rules if the pages are related sequence steps.
 
 ```json
 {
-  "model": "Qwen3-VL-8B-Instruct",
+  "model": "Qwen3-VL-32B-Instruct-AWQ",
   "temperature": 0.0,
   "max_tokens": 4096,
   "response_format": { "type": "json_object" }
