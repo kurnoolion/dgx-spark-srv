@@ -14,6 +14,10 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - /data/srv/data/caddy:/data          # TLS certs + internal-CA state
       - /data/srv/data/caddy-config:/config
+      # Status dashboard content — written by on-box scripts into
+      # /data/srv/status/ on the host; served read-only by Caddy under
+      # /health-status/ (see Caddyfile).
+      - /data/srv/status:/srv/static/status:ro
     environment:
       SITE_HOST: ${SITE_HOST}
       # Caddy uses SITE_ADDRESSES as its site-address line. Defaults to SITE_HOST

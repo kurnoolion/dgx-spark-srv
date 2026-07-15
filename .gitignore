@@ -4,6 +4,7 @@
 .env.production
 .env.sops
 .env.enc
+.env.bak*
 *.key
 *.pem
 ~/.age-key.txt
@@ -23,6 +24,11 @@
 # Runtime / generated (in case anyone ever runs make init inside the source dir)
 data/
 backups/
+# Status dashboard content — written by on-box scripts, served by Caddy at
+# /health-status/ (see compose.gateway.yml volume mount for path mapping).
+/status/
+# Output of vllm-watch-load.sh when redirected to a bare file.
+/vllm-watch-load
 
 # Logs
 *.log
