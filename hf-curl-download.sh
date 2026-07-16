@@ -22,6 +22,12 @@
 #                             corporate-proxy response-size caps that silently
 #                             truncate large HTTPS responses. Auto-halves at
 #                             runtime if chunks still come up short.)
+#   HF_HASH_MIN=104857600    verify SHA256 for files ≥ this size (default 100 MB).
+#                            Set to 0 to disable hash verification entirely.
+#                            HF exposes SHA256 as the X-Linked-Etag header for
+#                            LFS-tracked files (all safetensors shards). Small
+#                            non-LFS files (config.json, etc.) don't carry this
+#                            header — those get skipped with a note.
 #
 # To point vLLM at the result, set in .env:
 #   VLLM_MODEL=/data/models/local/Qwen3-32B-AWQ
@@ -33,6 +39,7 @@ REPO="${1:-}"
 DEST="${2:-/data/models/local/${REPO##*/}}"
 MAX_FILE_ATTEMPTS="${MAX_FILE_ATTEMPTS:-10}"
 CHUNK_SIZE="${HF_CHUNK_SIZE:-524288000}"    # 500 MB default
+HASH_MIN_SIZE="${HF_HASH_MIN:-104857600}"   # 100 MB default; 0 disables
 
 # Get HF token from env or token file
 if [[ -z "${HF_TOKEN:-}" ]]; then
@@ -238,7 +245,39 @@ for line in "${FILE_LINES[@]}"; do
   if (( file_ok == 1 )); then
     final_size=$(stat -c %s "$f")
     if (( final_size == total_size )); then
-      echo "  → OK ($final_size bytes verified via chunked download)"
+
+      # SHA256 content verification (files above threshold).
+      # HF returns the file's SHA256 in the X-Linked-Etag header for LFS-tracked
+      # files. Small non-LFS files (config, tokenizer) don't have this header —
+      # those get skipped with a note (size check is the best we can do).
+      # A missing header for a LARGE file usually means a proxy is stripping
+      # it; consider setting HF_HASH_MIN=0 in that case.
+      if (( HASH_MIN_SIZE > 0 && final_size >= HASH_MIN_SIZE )); then
+        printf "  verifying SHA256..."
+        expected_hash=$(curl -sI -L --max-time 30 "${AUTH_HEADER[@]}" \
+                         "https://huggingface.co/${REPO}/resolve/main/${f}" 2>/dev/null \
+                         | grep -i '^x-linked-etag:' \
+                         | head -1 | tr -d '\r"' | awk '{print $2}')
+        if [[ -z "$expected_hash" ]]; then
+          echo " skipped (no X-Linked-Etag header — not LFS-tracked, or stripped by proxy)"
+        else
+          actual_hash=$(sha256sum "$f" | cut -d' ' -f1)
+          # normalize case for comparison
+          if [[ "${expected_hash,,}" == "${actual_hash,,}" ]]; then
+            echo " OK (${actual_hash:0:16}...)"
+          else
+            echo " MISMATCH"
+            echo "      expected: $expected_hash"
+            echo "      got:      $actual_hash"
+            echo "      → deleting corrupt file — rerun to redownload"
+            rm -f "$f"
+            FAILED+=("$f")
+            continue
+          fi
+        fi
+      fi
+
+      echo "  → OK ($final_size bytes verified)"
     else
       echo "  [X] FINAL SIZE MISMATCH: got $final_size, expected $total_size"
       FAILED+=("$f")
