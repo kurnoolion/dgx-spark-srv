@@ -102,8 +102,8 @@ services:
   # the switcher for debugging: `docker compose --profile manual up -d vllm-vl`.
   #
   # Memory: when active, the text vllm is stopped, so this service claims the
-  # same generous slice text does. Default 0.65 (~83 GB pool) leaves ~63 GB
-  # for KV cache after ~20 GB of 32B AWQ weights — comfortable for 32K-context
+  # same generous slice text does. Default 0.65 (~83 GB pool) leaves ~51 GB
+  # for KV cache after ~32 GB of 32B FP8 weights — comfortable for 32K-context
   # sequences. See VL_GPU_UTIL in .env.example to tune per model choice.
   vllm-vl:
     profiles: ["manual"]
@@ -115,7 +115,7 @@ services:
       - sh
       - -c
       - >
-        M="${VL_MODEL:-Qwen/Qwen3-VL-32B-Instruct-AWQ}";
+        M="${VL_MODEL:-Qwen/Qwen3-VL-32B-Instruct-FP8}";
         case "$$M" in
           /*)   LOAD="$$M";             SERVED="$${M##*/}" ;;
           */*)  LOAD="$$M";             SERVED="$${M##*/}" ;;
