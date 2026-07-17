@@ -1,7 +1,11 @@
 # Web / backend apps. Each must be arm64 / multi-arch.
 #
 # The 'apex' external network gives apps access to:
-#   vllm:8000   — OpenAI-compatible LLM API
+#   model-switch:9000 — OpenAI-compatible LLM API (multiplexes vllm text/VL;
+#                       always prefer this over vllm:8000 so both models are
+#                       visible and mutex-swap works on model change).
+#   vllm:8000   — text vLLM backend (do NOT hit directly from apps — bypasses
+#                 the switcher; only advertises the text model).
 #   tei:80      — embeddings (bge-m3)
 #   ollama:11434 — Ollama API
 #   postgres:5432, redis:6379, qdrant:6333, minio:9000 — data services
@@ -17,8 +21,11 @@ services:
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
     environment:
-      OPENAI_API_BASE_URL: http://vllm:8000/v1
-      OPENAI_API_KEY: dummy                  # vLLM doesn't validate; any value works
+      # Point at model-switch so open-webui sees BOTH text + VL models on
+      # /v1/models, and hits the mutex-swap path on model change. Talking to
+      # vllm:8000 directly would only advertise the text model.
+      OPENAI_API_BASE_URL: http://model-switch:9000/v1
+      OPENAI_API_KEY: dummy                  # switcher doesn't validate; any value works
       WEBUI_AUTH: "true"                     # first signup → admin
       WEBUI_NAME: "APEX Spark"
       WEBUI_URL: "https://${SITE_HOST}"      # served at site root (open-webui doesn't sub-path cleanly)
@@ -45,7 +52,7 @@ services:
 #       DATABASE_URL: postgresql://${PG_USER}:${PG_PW}@postgres:5432/${PG_DB}
 #       REDIS_URL: redis://redis:6379/0
 #       QDRANT_URL: http://qdrant:6333
-#       VLLM_BASE_URL: http://vllm:8000/v1
+#       VLLM_BASE_URL: http://model-switch:9000/v1   # prefer over vllm:8000 (see note at top)
 #       TEI_URL: http://tei:80
 #       HF_TOKEN: ${HF_TOKEN}
 #     networks: [apex]
