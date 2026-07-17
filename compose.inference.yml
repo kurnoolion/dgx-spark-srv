@@ -115,7 +115,7 @@ services:
       - sh
       - -c
       - >
-        M="${VL_MODEL:-Qwen/Qwen3-VL-32B-Instruct-FP8}";
+        M="${VL_MODEL:-Qwen3-VL-32B-Instruct-FP8}";
         case "$$M" in
           /*)   LOAD="$$M";             SERVED="$${M##*/}" ;;
           */*)  LOAD="$$M";             SERVED="$${M##*/}" ;;
