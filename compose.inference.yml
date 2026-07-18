@@ -107,7 +107,7 @@ services:
   # sequences. See VL_GPU_UTIL in .env.example to tune per model choice.
   vllm-vl:
     profiles: ["manual"]
-    image: nvcr.io/nvidia/vllm:25.11-py3
+    image: nvcr.io/nvidia/vllm:26.04-py3
     # Same VLLM_MODEL-style resolver as the text vllm service.
     # Note: --limit-mm-per-prompt accepts JSON in vLLM 0.10+; older forms
     # (image=N) were deprecated. See vllm issue #21615.
@@ -127,11 +127,15 @@ services:
         --gpu-memory-utilization "${VL_GPU_UTIL:-0.65}"
         --max-model-len "${VL_MAX_LEN:-32768}"
         --limit-mm-per-prompt '{"image":${VL_MAX_IMAGES:-6}}'
+        --attention-backend triton_attn
         --host 0.0.0.0 --port 8000
     environment:
       HF_TOKEN: ${HF_TOKEN}
       HF_HUB_ENABLE_HF_TRANSFER: "1"
       HF_HOME: /data/hf-cache
+      # DGX Spark FP8 stability workaround (documented in NGC 26.x release notes).
+      # DeepGEMM's FP8 kernels have known stream-capture issues on GB10; keep off.
+      VLLM_USE_DEEP_GEMM: "0"
     volumes:
       - /data/models:/data
     ipc: host
