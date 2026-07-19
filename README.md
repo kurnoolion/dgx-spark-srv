@@ -40,6 +40,10 @@ make pull-stack
 
 # Just one image:
 make pull-stack images="nvcr.io/nvidia/vllm:25.11-py3"
+
+# Both vLLM images at once (text vLLM stays on 25.11; vllm-vl runs 26.04
+# for Qwen3-VL Conv3d support — see "VL model setup" below):
+make pull-stack images="nvcr.io/nvidia/vllm:25.11-py3 nvcr.io/nvidia/vllm:26.04-py3"
 ```
 
 **Auth**:
@@ -132,6 +136,64 @@ routed into `message.reasoning_content` rather than appearing in
 docker compose -f compose.inference.yml exec vllm curl -s localhost:8000/v1/models
 ```
 
+### VL model setup (mutex-swap with text vLLM)
+
+The stack also runs a vision-language (VL) model as a *separate* vLLM
+service — `vllm-vl` — that is **mutually exclusive** with the text vLLM.
+Only one is loaded at a time. **model-switch** (`compose.switch.yml`) owns
+the lifecycle: when a client requests a model that isn't currently loaded,
+it stops the other backend and starts the requested one before proxying.
+
+The router advertises both models on `/v1/models`. Picking one on a request
+triggers the swap — warm→warm is ~30s; a cold VL start on 32B FP8 is
+~3–5 min. Tune `READY_TIMEOUT_S` in `compose.switch.yml` if your cold
+starts routinely exceed the default 300s.
+
+**Configuration** (`.env` — see `.env.example` for the exhaustive list):
+
+| Var | Purpose | Example |
+|---|---|---|
+| `TEXT_MODEL_NAME` | Advertised name for text vLLM (must match its `--served-model-name`) | `Qwen3-32B-AWQ` |
+| `VL_MODEL` | VL weights identifier — same three forms as `VLLM_MODEL` | `Qwen3-VL-32B-Instruct-FP8` |
+| `VL_MODEL_NAME` | Advertised name for VL vLLM | `Qwen3-VL-32B-Instruct-FP8` |
+| `VL_GPU_UTIL` | Memory slice when VL is active (text is stopped, so parity with `VLLM_GPU_UTIL` is fine) | `0.65` |
+| `VL_MAX_LEN` / `VL_MAX_IMAGES` | Context and per-prompt image caps | `32768` / `6` |
+
+**Download** — the FP8 repo is gated, so accept the license on the HF page
+first, then:
+```bash
+./hf-curl-download.sh Qwen/Qwen3-VL-32B-Instruct-FP8
+```
+
+**Trigger the swap** (first call blocks during cold start):
+```bash
+curl -sk https://apex-spark-01.local/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -d '{"model":"Qwen3-VL-32B-Instruct-FP8","messages":[
+        {"role":"user","content":[
+          {"type":"text","text":"Describe this diagram."},
+          {"type":"image_url","image_url":{"url":"data:image/png;base64,..."}}
+        ]}]}'
+```
+
+**NGC image split** — text vLLM stays on `nvcr.io/nvidia/vllm:25.11-py3`;
+`vllm-vl` runs `26.04-py3`. The bump is not a workaround: Qwen3-VL's
+vision-encoder Conv3d has no cuDNN engine registered for sm_121 in vLLM
+0.10.x (the 25.11 image), so it crashes with `RuntimeError: GET was unable
+to find an engine to execute this computation` at model load. vLLM 0.19.0
+(packaged as NGC 26.04-py3, via upstream PRs #28455 + #27418) rewrites
+that path to `F.linear` over reshaped patches and sidesteps the missing
+kernel entirely. Two Spark FP8 stability flags are baked into `vllm-vl`
+per NGC 26.x release notes: `--attention-backend triton_attn` and
+`VLLM_USE_DEEP_GEMM=0`. Don't move text vLLM to 26.x without re-validation
+— the current pairing was chosen deliberately.
+
+**App wiring** — any app that needs both models visible **must** target
+`http://model-switch:9000/v1`, not `http://vllm:8000/v1`. Talking to
+`vllm:8000` directly only advertises the text model and bypasses the
+mutex swap. Open-WebUI is already wired that way in `compose.apps.yml`;
+follow the same pattern for new apps.
+
 ## GPU memory budget (128 GB unified)
 
 | Consumer | Target | Enforced by |
@@ -188,7 +250,7 @@ make vllm-start    # reclaims the configured VLLM_GPU_UTIL slice
 ## Routes (via Caddy, http://$SITE_HOST)
 | Path | Backend | Use |
 |---|---|---|
-| `/v1/*` | vLLM :8000 | OpenAI-compatible chat/completions. Prefix preserved. For Qwen3 / DeepSeek-R1, the reasoning parser is enabled via `VLLM_REASONING_PARSER` in `.env` — `<think>` blocks are routed into `choices[].message.reasoning_content` so `message.content` carries only the clean answer. |
+| `/v1/*` | model-switch :9000 | OpenAI-compatible chat/completions. **Multiplexes text vLLM and VL vLLM** — `/v1/models` advertises both; picking a model that isn't loaded triggers a mutex swap (see "VL model setup"). Prefix preserved. For Qwen3 / DeepSeek-R1, the reasoning parser is enabled via `VLLM_REASONING_PARSER` in `.env` — `<think>` blocks are routed into `choices[].message.reasoning_content` so `message.content` carries only the clean answer. |
 | `/ollama/*` | Ollama :11434 | Ollama API (prefix stripped) |
 | `/embed/*` | TEI :80 | embeddings for RAG (prefix stripped — POST to `/embed/embed`) |
 | `/rerank/*` | tei-reranker :80 | cross-encoder reranking for RAG (Cohere-compatible `/rerank` endpoint, POST to `/rerank/rerank`). Same TEI image as `/embed`, different model — runs on GPU (~4 GB) alongside the embedder. Default model `bge-reranker-large` (~568M, xlm-roberta). Reranker selection requires both ONNX weights on HF and a `model_type` field in config.json — see `.env.example` for the cautionary list (`bge-reranker-v2-m3` lacks ONNX; `jina-reranker-v2-base-multilingual` lacks `model_type`). |
@@ -257,7 +319,8 @@ symptom→fix troubleshooting table.
 
 ## Files
 - `docker-compose.yml` — postgres, redis, qdrant, minio
-- `compose.inference.yml` — vllm, ollama, tei (GPU)
+- `compose.inference.yml` — vllm, ollama, tei, vllm-vl (GPU; vllm-vl is `profiles: [manual]` and started on demand by model-switch)
+- `compose.switch.yml` + `model-switch/` — router that owns the vLLM mutex lifecycle; multiplexes text + VL on `/v1/*`
 - `compose.gateway.yml` + `Caddyfile` — reverse proxy / TLS
 - `compose.apps.yml` — your apps (example included)
 - `compose.observability.yml` + `observability/` — Prometheus, Grafana, exporters

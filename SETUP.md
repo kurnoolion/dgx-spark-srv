@@ -226,6 +226,19 @@ sudo usermod -aG ml-users $USER
 ```
 
 ### A10. Pre-download HF models — biggest pre-docker time-saver
+
+> **Preflight: raise your XFS user quota** before pulling anything ≥ ~30 GB.
+> The default per-user cap is `40G soft / 45G hard` (see A3 / STORAGE.md).
+> A single Qwen3-32B-AWQ (~19 GB) is fine; Qwen3-VL-32B-Instruct-FP8 (~32 GB)
+> alone is not, and both together will DEFINITELY hit the cap. Symptoms are
+> misleading — `curl` exits with `error 23 (Failure writing output to
+> destination)` mid-transfer while `df` reports the FS 3% full. Raise the
+> cap once for the operator account:
+> ```bash
+> sudo xfs_quota -x -c 'limit -u bsoft=450g bhard=500g $USER' /data
+> sudo xfs_quota -x -c 'report -h -u' /data       # verify
+> ```
+
 Use the bundled `download-models.sh` (retry logic, logging, defaults from `.env`):
 ```bash
 hf auth login                          # paste HF_TOKEN (one-time)
@@ -247,15 +260,17 @@ the Python downloader, even though `curl` works fine. Symptom: `du -sh
 /data/models/hf-cache` flat; `.incomplete` blob files at 0 bytes;
 `diagnose-hf.sh` shows API probes succeeding. Use the curl-based downloader:
 ```bash
-./hf-curl-download.sh Qwen/Qwen3-32B-AWQ           # → /data/models/local/Qwen3-32B-AWQ/
-./hf-curl-download.sh BAAI/bge-m3                  # embedder
-./hf-curl-download.sh BAAI/bge-reranker-large      # reranker — see note
+./hf-curl-download.sh Qwen/Qwen3-32B-AWQ                    # → /data/models/local/Qwen3-32B-AWQ/
+./hf-curl-download.sh Qwen/Qwen3-VL-32B-Instruct-FP8        # → /data/models/local/Qwen3-VL-32B-Instruct-FP8/  (gated — accept license on HF first)
+./hf-curl-download.sh BAAI/bge-m3                           # embedder
+./hf-curl-download.sh BAAI/bge-reranker-large               # reranker — see note
 ```
 This bypasses `hf` entirely, writes a flat directory, and resumes interrupted
 downloads. Set the bare model names in `.env` (the compose resolver expands
 them to `/data/local/<name>` inside the container):
 ```
 VLLM_MODEL=Qwen3-32B-AWQ
+VL_MODEL=Qwen3-VL-32B-Instruct-FP8
 TEI_MODEL=bge-m3
 TEI_RERANKER_MODEL=bge-reranker-large
 ```
@@ -349,22 +364,29 @@ make pull-stack images='postgres:16 redis:7 qdrant/qdrant:latest \
 ```bash
 export NGC_API_KEY=<your-ngc-api-key>
 make pull-stack images='nvcr.io/nvidia/vllm:25.11-py3 \
+  nvcr.io/nvidia/vllm:26.04-py3 \
   nvcr.io/nvidia/k8s/dcgm-exporter:3.3.9-3.6.1-ubuntu22.04'
 ```
 
-> **vLLM image is ~20 GB** at your proxy throughput it may take **hours**.
-> Run it under `tmux` or `nohup` so a dropped SSH doesn't kill it:
+> **Two vLLM images by design.** Text `vllm` runs `25.11-py3`; `vllm-vl` runs
+> `26.04-py3` — the newer image has the linear-fallback PatchEmbed that
+> Qwen3-VL's vision encoder needs on sm_121 (see README "VL model setup" for
+> the root cause). Don't move text vLLM to 26.x without re-validation.
+
+> **Each vLLM image is ~20 GB** — at your proxy throughput it may take **hours**.
+> Run each under `tmux` or `nohup` so a dropped SSH doesn't kill it:
 > ```
 > nohup make pull-stack images='nvcr.io/nvidia/vllm:25.11-py3' &> ~/vllm-pull.log &
 > disown
 > tail -f ~/vllm-pull.log
+> # ... then again for 26.04-py3 when the first finishes
 > ```
 
-#### Verify the 12 pulled images landed
+#### Verify the pulled images landed
 ```bash
 docker images | sort
-# expect 13 entries (the stack minus TEI), each with proper REPOSITORY:TAG
-# (TEI will be built locally in B2-build below → 14 total after that)
+# expect 14 entries (the stack minus TEI, counting BOTH vLLM images), each with
+# proper REPOSITORY:TAG. (TEI will be built locally in B2-build below → 15 total after that.)
 ```
 
 ### B2-build. Build TEI from source (no arm64 prebuilt exists)
@@ -428,6 +450,29 @@ sed -i 's|^FROM nvidia/cuda:|FROM nvcr.io/nvidia/cuda:|' Dockerfile-cuda
 grep ^FROM Dockerfile-cuda                # confirm both lines now nvcr.io
 ```
 Drop the patch later with `git checkout Dockerfile-cuda`.
+
+#### Preflight: patch Dockerfile-cuda for corp DPI (if applicable)
+If the box is behind a corp perimeter that resets large post-quantum TLS
+ClientHellos (symptom: `docker compose build` fails mid-build with
+`Connection reset by peer` on pip/apt/cargo HTTPS even though the same
+calls succeed on the host), the container-side base image's OpenSSL 3.5+
+needs to be told to use classical key-exchange groups. Skip if the box
+isn't behind such a proxy — the stanza is only needed when container-side
+OpenSSL 3.5+ sees ClientHello resets that host-side OpenSSL 3.0 doesn't.
+
+**Fix**: right after **each `FROM` line** in `Dockerfile-cuda`, insert this
+block verbatim (same one already baked into `model-switch/Dockerfile` in
+this repo — copy from there if you need to double-check the form):
+```dockerfile
+RUN printf '%s\n' 'openssl_conf = openssl_init' '[openssl_init]' \
+    'ssl_conf = ssl_sect' '[ssl_sect]' 'system_default = system_default_sect' \
+    '[system_default_sect]' 'Groups = X25519:P-256:P-384' > /etc/openssl-classical.cnf
+ENV OPENSSL_CONF=/etc/openssl-classical.cnf
+```
+`Dockerfile-cuda` has TWO `FROM` lines (build stage + runtime stage) —
+inject after both. Same rule for `Dockerfile-arm64` if you're using the
+CPU fallback below. Verify with `grep -c OPENSSL_CONF Dockerfile-cuda` —
+expect a count matching the number of `FROM` lines you patched.
 
 #### Build the GPU image (default)
 ```bash

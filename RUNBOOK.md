@@ -24,7 +24,9 @@ cd /data/srv
 | Update images + redeploy | `make deploy` |
 | Shift vLLM/Ollama memory | `make rebalance util=0.50` |
 | Free GPU for big Ollama job | `make vllm-stop` … `make vllm-start` |
+| Force a text↔VL swap now | `curl -s http://<host>/v1/chat/completions -d '{"model":"<name>","messages":[...]}'` (see "VL model swap") |
 | Check `/data` split usage | `sudo xfs_quota -x -c 'report -h' /data` |
+| Check per-user quotas | `sudo xfs_quota -x -c 'report -h -u' /data` (default 45G blocks big model downloads — see "User management") |
 | Check docker reclaimable space | `make prune-status` |
 
 ## Public endpoints
@@ -34,7 +36,7 @@ the spark's IP, or `localhost` if running on-box.
 
 | Service | URL | Method | Notes |
 |---|---|---|---|
-| vLLM (OpenAI-compatible) | `http://<host>/v1/...` | POST | e.g. `/v1/chat/completions`, `/v1/models`. Prefix preserved. |
+| vLLM (OpenAI-compatible, via model-switch) | `http://<host>/v1/...` | POST | e.g. `/v1/chat/completions`, `/v1/models`. Prefix preserved. **model-switch** multiplexes text vLLM + VL vLLM — `/v1/models` lists both; picking one that isn't loaded triggers a mutex swap. |
 | TEI embeddings | `http://<host>/embed/embed` | POST | Caddy strips `/embed`, TEI's own endpoint is `/embed` — hence the doubled path. |
 | TEI reranker | `http://<host>/rerank/rerank` | POST | Same prefix-strip quirk as embed. Cohere-compatible schema. |
 | Ollama | `http://<host>/ollama/...` | POST | Prefix stripped — e.g. `/ollama/api/generate` → `/api/generate`. |
@@ -48,7 +50,8 @@ the spark's IP, or `localhost` if running on-box.
 |---|---|---|
 | Embedder (`TEI_MODEL`) | `bge-m3` | 1024-dim, multilingual, 8192-token context. |
 | Reranker (`TEI_RERANKER_MODEL`) | `bge-reranker-large` | xlm-roberta cross-encoder, 512-token context per (query, candidate) pair. |
-| LLM (`VLLM_MODEL`) | depends on `.env` | `curl -s http://<host>/v1/models` for the exact `id` clients must pass. |
+| LLM (`VLLM_MODEL`, text) | depends on `.env` | `curl -s http://<host>/v1/models` for the exact `id` clients must pass. |
+| VL LLM (`VL_MODEL`, vision) | depends on `.env` (default `Qwen3-VL-32B-Instruct-FP8`) | Same `/v1/models` lists it too. Client picks it via the `model` field; model-switch swaps the backend on demand. |
 
 **Request schemas** (TEI OpenAPI — Cohere-compatible for rerank):
 
@@ -87,7 +90,7 @@ make restart svc=<name> # one service
 make logs svc=<name>    # follow logs (Ctrl-C to stop)
 make deploy             # git pull-equivalent: pull images + recreate
 ```
-Service names: `postgres redis qdrant minio vllm ollama tei caddy prometheus grafana cadvisor node-exporter dcgm-exporter` (+ your apps from `compose.apps.yml` once you add them).
+Service names: `postgres redis qdrant minio vllm ollama tei tei-reranker model-switch caddy prometheus grafana cadvisor node-exporter dcgm-exporter open-webui` (+ your apps from `compose.apps.yml` once you add them). `vllm-vl` is `profiles: [manual]` — `make up` creates it but doesn't start it; **model-switch owns its lifecycle** and starts/stops it on client demand.
 
 Internal endpoints are **not** published to the host (only Caddy's :80 is).
 To probe a backend directly:
@@ -143,6 +146,56 @@ docker compose -f compose.inference.yml exec -T vllm \
   | python3 -m json.tool
 # message.content should be the answer only; thinking lives in reasoning_content
 ```
+
+**VL model swap** (text ↔ vision). model-switch owns the mutex — only one
+vLLM backend is loaded at a time.
+
+Trigger a swap by sending a request naming the model you want:
+```bash
+# → VL (blocks ~3-5 min on cold start of 32B FP8; ~30s if VL was recently up)
+curl -sk http://<host>/v1/chat/completions -H 'content-type: application/json' \
+  -d '{"model":"Qwen3-VL-32B-Instruct-FP8","messages":[
+        {"role":"user","content":[
+          {"type":"text","text":"Describe."},
+          {"type":"image_url","image_url":{"url":"data:image/png;base64,..."}}
+        ]}]}'
+
+# → back to text
+curl -sk http://<host>/v1/chat/completions -H 'content-type: application/json' \
+  -d '{"model":"Qwen3-32B-AWQ","messages":[{"role":"user","content":"hi"}]}'
+```
+
+Both models are always listed on `/v1/models` — the switch is triggered by
+request content, not an explicit API call. Watch the swap in flight:
+```bash
+watch -n2 'docker ps -a --format "table {{.Names}}\t{{.Status}}" | grep vllm'
+docker logs -f srv-model-switch-1        # swap decisions + 30x/50x responses
+docker logs -f srv-vllm-vl-1             # VL model load progress
+```
+
+**Change the VL model** (or the served text name):
+```bash
+# 1. Download the new weights (if applicable)
+./hf-curl-download.sh Qwen/Qwen3-VL-8B-Instruct
+# 2. Edit /data/srv/.env — VL_MODEL, VL_MODEL_NAME, optionally VL_GPU_UTIL
+# 3. Bounce the switcher so it re-reads env vars, plus vllm-vl so a new
+#    container spec is created:
+make restart svc=model-switch
+docker compose -f compose.inference.yml --profile manual up -d --force-recreate vllm-vl
+docker stop srv-vllm-vl-1     # let model-switch start it on next demand
+```
+
+**NGC image split for vllm-vl** — text `vllm` runs `25.11-py3`; `vllm-vl`
+runs `26.04-py3` because Qwen3-VL's vision-encoder Conv3d crashes on sm_121
+in vLLM 0.10.x. Do NOT move the text service to 26.04 without re-validation;
+the pairing was chosen deliberately. See README "VL model setup" for the
+root-cause detail. If the VL container exits at load with `RuntimeError: GET
+was unable to find an engine to execute this computation`, `vllm-vl` is
+running the wrong image — check `docker inspect srv-vllm-vl-1 | grep Image`.
+
+**Cold-swap timing knob**: `READY_TIMEOUT_S` in `compose.switch.yml` (default
+300s). If cold VL loads routinely take longer (concurrent downloads competing
+for I/O, larger fp16 model), bump it and `make restart svc=model-switch`.
 
 **TEI reranker** (`tei-reranker` service, route `/rerank/*`) runs in its own
 container using the same TEI image as the embedder but pointed at a
@@ -309,6 +362,20 @@ anywhere on `/data` (home + anything they own in `models/shared`), not just home
 The `home` *project* quota bounds the home tree collectively; resize it like any
 split (`limit -p bhard=<size> home /data`).
 
+**Gotcha: the 40G/45G default blocks large-model downloads.** Any user pulling
+Qwen3-32B-AWQ (~19G), Qwen3-VL-32B-Instruct-FP8 (~32G), or similar with
+`hf-curl-download.sh` will hit the cap mid-stream. **Symptoms are misleading:**
+`df` shows the FS 3% full, curl reports `error 23 (Failure writing output to
+destination)` and grinds in `--retry 100` for hours. `dd conv=fsync` reveals
+the truth (`Disk quota exceeded`). **Before large pulls,** raise the operator
+account's cap:
+```bash
+sudo xfs_quota -x -c 'limit -u bsoft=450g bhard=500g <user>' /data
+```
+Files owned by that user still count against both the user quota AND the
+project quota of the tree they live in (e.g. downloads to `/data/models/local`
+count against `models` too), so both must have headroom.
+
 Remind new users: don't override `HF_HOME` (shared cache at `/data/models/hf-cache`),
 put datasets in `/data/models/shared`, keep envs off `/home` (use `uv`).
 
@@ -360,6 +427,10 @@ restart the dependent services.
 | `nvidia-smi` fails / GPU not in container | driver or container-toolkit issue | `nvidia-smi` on host; `sudo systemctl restart docker`; check `nvidia-container-toolkit` |
 | Image pull / model download hangs | corp proxy not reaching daemon/CLI | verify `/etc/systemd/system/docker.service.d/proxy.conf` and shell proxy env |
 | Container "exec format error" / very slow | x86-only image under emulation | replace with arm64/multi-arch image |
+| `vllm-vl` exits at load with `RuntimeError: GET was unable to find an engine to execute this computation` | Running the old `25.11-py3` image on Qwen3-VL — vision-encoder Conv3d has no cuDNN engine for sm_121 in vLLM 0.10.x | Confirm `vllm-vl` is on `26.04-py3` (`docker inspect srv-vllm-vl-1 \| grep Image`). If not, verify `compose.inference.yml`, then `make down && make up`. See README "VL model setup" for the full root cause. |
+| `hf-curl-download.sh` reports `curl: (23) Failure writing output to destination` mid-transfer, `df` shows lots of free space | XFS **user** quota reached (default 45G/user; a single 32B model exceeds it) | `sudo xfs_quota -x -c 'report -h -u' /data` to confirm; raise cap: `sudo xfs_quota -x -c 'limit -u bsoft=450g bhard=500g <user>' /data`. See "User management". |
+| `/v1/models` shows only the text model; VL request 404s or returns "model not found" | Client is talking to `vllm:8000` directly, not `model-switch:9000` | For internal apps: set `OPENAI_API_BASE_URL: http://model-switch:9000/v1` in the compose service. For external clients: use the `/v1/*` route via Caddy (not a hardcoded backend URL). |
+| VL cold-swap times out at exactly 300s (`504 Gateway Timeout` from switcher, `srv-vllm-vl-1` still starting) | `READY_TIMEOUT_S` too tight for this model's cold load | Bump `READY_TIMEOUT_S` in `compose.switch.yml`, `make restart svc=model-switch`. |
 | 502 from gateway on a route | backend down or unhealthy | `make ps`; `make logs svc=<backend>` |
 | API returns unexpected 401/403 | a backend's own auth (Grafana/Postgres/MinIO) | gateway is unauthenticated — check the specific backend's logs/credentials |
 | Disk full on `/` | logs growth; or docker if not on own LV | `journalctl --vacuum-size=500M`; `make prune`; ensure `make install-system` ran (caps logs) |

@@ -79,6 +79,22 @@ sudo xfs_quota -x -c 'limit -u bsoft=40g bhard=45g <user>' /data
 The `home` project quota bounds the home tree *collectively*; per-user quotas
 keep one user from consuming the whole home allowance.
 
+> **Gotcha: the 40G/45G default is too low for operators pulling large models.**
+> Qwen3-32B-AWQ (~19 GB), Qwen3-VL-32B-Instruct-FP8 (~32 GB), and similar
+> weights are downloaded to `/data/models/local/<name>/` but their files are
+> **owned by the operator** — so they count against the user quota AND the
+> `models` project quota in parallel. A single 32 GB VL model already exceeds
+> the default cap. Symptoms are misleading: `hf-curl-download.sh` reports
+> `curl: (23) Failure writing output to destination` mid-transfer and grinds
+> in `--retry 100` for hours while `df` shows the FS 3% full. `dd
+> conv=fsync` exposes it as `Disk quota exceeded`. **Before large pulls,**
+> raise the operator account's cap:
+> ```bash
+> sudo xfs_quota -x -c 'limit -u bsoft=450g bhard=500g <operator>' /data
+> ```
+> Consider bumping the default in `setup-storage.sh` if this comes up for
+> more than one user on the box.
+
 ### Check usage
 ```bash
 sudo xfs_quota -x -c 'report -h -p' /data     # project (home/models/srv) usage
