@@ -10,7 +10,7 @@ networks:
 services:
   # ── vLLM — 75% of inference pool (~84GB via gpu-memory-utilization 0.65) ──
   vllm:
-    image: nvcr.io/nvidia/vllm:25.11-py3      # NGC Spark-tuned, GB10/sm_121 ready
+    image: nvcr.io/nvidia/vllm:26.04-py3      # NGC Spark-tuned, GB10/sm_121 ready; 26.04 for qwen3_5_moe + NVFP4 arch support
     # Shell form is used for two reasons:
     #   1. resolve VLLM_MODEL — supports three forms, see below.
     #   2. conditionally append --reasoning-parser only when set.
